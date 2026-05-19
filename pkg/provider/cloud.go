@@ -67,6 +67,24 @@ type LoadBalancerConfig struct {
 	// This is a temporary flag to enable/disable the EPS controller
 	// When disabled the service selector is used.
 	EnableEPSController *bool `yaml:"enableEPSController,omitempty"`
+
+	// LBServerAddr is the connect-rpc server address for the LoadBalancer API
+	LBServerAddr string `yaml:"lbServerAddr,omitempty"`
+
+	// TenantID is passed to the LoadBalancer API
+	TenantID string `yaml:"tenantID,omitempty"`
+
+	// NetworkID is the internal network ID passed to the LoadBalancer API
+	NetworkID string `yaml:"networkID,omitempty"`
+
+	// SubnetID is the subnet ID passed to the LoadBalancer API
+	SubnetID string `yaml:"subnetID,omitempty"`
+
+	// FipNetworkID is the external network ID for floating IP allocation
+	FipNetworkID string `yaml:"fipNetworkID,omitempty"`
+
+	// Algorithm is the LB algorithm: ROUND_ROBIN, LEAST_REQUEST, RANDOM, CONSISTENT_HASH
+	Algorithm string `yaml:"algorithm,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -168,11 +186,13 @@ func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	if !c.config.LoadBalancer.Enabled {
 		return nil, false
 	}
+	lbClient := newLBClient(c.config.LoadBalancer.LBServerAddr)
 	return &loadbalancer{
 		namespace:   c.namespace,
 		client:      c.client,
 		config:      c.config.LoadBalancer,
 		infraLabels: c.config.InfraLabels,
+		lbClient:    lbClient,
 	}, true
 }
 
