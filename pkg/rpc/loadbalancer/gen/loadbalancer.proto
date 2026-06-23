@@ -1,0 +1,382 @@
+syntax = "proto3";
+
+package loadbalancer.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "kubevirt.io/cloud-provider-kubevirt/pkg/rpc/loadbalancer/gen;loadbalancerv1";
+
+// LoadBalancerService manages load balancer lifecycle.
+service LoadBalancerService {
+  // CreateLoadBalancer accepts a new load balancer request and persists it
+  // with state PENDING. The provisioning IP is not returned at this stage.
+  rpc CreateLoadBalancer(CreateLoadBalancerRequest) returns (CreateLoadBalancerResponse);
+
+  // GetLoadBalancer returns the full detail of a single load balancer.
+  rpc GetLoadBalancer(GetLoadBalancerRequest) returns (GetLoadBalancerResponse);
+
+  // ListLoadBalancers returns a summary list. Optionally filtered by tenant.
+  rpc ListLoadBalancers(ListLoadBalancersRequest) returns (ListLoadBalancersResponse);
+
+  // DeleteLoadBalancer marks the resource as DELETING and returns immediately.
+  rpc DeleteLoadBalancer(DeleteLoadBalancerRequest) returns (DeleteLoadBalancerResponse);
+
+  // BatchDeleteLoadBalancers marks multiple resources as DELETING and returns per-item results.
+  rpc BatchDeleteLoadBalancers(BatchDeleteLoadBalancersRequest) returns (BatchDeleteLoadBalancersResponse);
+
+  // AllocateFloatingIp assigns (or re-assigns) a floating IP to a load balancer.
+  // Sets fip_state to PROVISIONING. The LB must be in READY state.
+  rpc AllocateFloatingIp(AllocateFloatingIpRequest) returns (AllocateFloatingIpResponse);
+
+  // ReleaseFloatingIp initiates removal of the floating IP from a load balancer.
+  // Sets fip_state to REMOVING.
+  rpc ReleaseFloatingIp(ReleaseFloatingIpRequest) returns (ReleaseFloatingIpResponse);
+
+  // UpdateLoadBalancer patches the configuration of an existing load balancer.
+  // Only fields present in the request are updated. Unset fields are left
+  // unchanged. If any spec field changes, the LB state is reset to PENDING so
+  // that the controller re-provisions the resource.
+  rpc UpdateLoadBalancer(UpdateLoadBalancerRequest) returns (UpdateLoadBalancerResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum State {
+  STATE_UNSPECIFIED = 0;
+  STATE_PENDING = 1;
+  STATE_PROVISIONING = 2;
+  STATE_READY = 3;
+  STATE_FAILED = 4;
+  STATE_DELETING = 5;
+  STATE_DELETED = 6;
+  STATE_UPDATING = 7;
+}
+
+// Algorithm defines the load balancing strategy for distributing traffic
+// across backend endpoints.
+enum Algorithm {
+  ALGORITHM_UNSPECIFIED = 0;
+  ALGORITHM_ROUND_ROBIN = 1;
+  ALGORITHM_LEAST_REQUEST = 2;
+  ALGORITHM_RANDOM = 3;
+  ALGORITHM_CONSISTENT_HASH = 4;
+}
+
+// Protocol defines the transport protocol for the load balancer listener.
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+  PROTOCOL_HTTP = 3;
+}
+
+// FipState describes the lifecycle state of a floating IP assignment.
+// HttpPathType defines how the path should be matched against HTTP request paths.
+enum HttpPathType {
+  HTTP_PATH_TYPE_UNSPECIFIED = 0;
+  // HTTP_PATH_TYPE_EXACT matches the path exactly.
+  HTTP_PATH_TYPE_EXACT = 1;
+  // HTTP_PATH_TYPE_PREFIX matches paths with the given prefix.
+  HTTP_PATH_TYPE_PREFIX = 2;
+  // HTTP_PATH_TYPE_REGEX matches paths using a regular expression.
+  HTTP_PATH_TYPE_REGEX = 3;
+}
+
+// HttpMethod defines the HTTP request method.
+enum HttpMethod {
+  HTTP_METHOD_UNSPECIFIED = 0;
+  HTTP_METHOD_GET = 1;
+  HTTP_METHOD_POST = 2;
+  HTTP_METHOD_PUT = 3;
+  HTTP_METHOD_DELETE = 4;
+  HTTP_METHOD_PATCH = 5;
+  HTTP_METHOD_HEAD = 6;
+  HTTP_METHOD_OPTIONS = 7;
+}
+
+enum FipState {
+  FIP_STATE_UNSPECIFIED = 0;
+  // FIP_STATE_NONE means no floating IP is assigned or requested.
+  FIP_STATE_NONE = 1;
+  // FIP_STATE_PROVISIONING means an allocation request is in progress.
+  FIP_STATE_PROVISIONING = 2;
+  // FIP_STATE_ACTIVE means the floating IP is assigned and active.
+  FIP_STATE_ACTIVE = 3;
+  // FIP_STATE_REMOVING means a release request is in progress.
+  FIP_STATE_REMOVING = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Shared sub-messages
+// ---------------------------------------------------------------------------
+
+// BackendRef is a single upstream endpoint the load balancer forwards to.
+message BackendRef {
+  string ip = 1;
+  int32 port = 2;
+}
+
+// HttpRoute defines HTTP-request-based routing rules (Gateway API HTTPRoute match).
+// Only relevant when Protocol is HTTP. All fields are optional.
+message HttpRoute {
+  // host is the hostname to match (e.g., "api.example.com"). Empty = any host.
+  string host = 1;
+  // path is the HTTP path to match (e.g., "/api/v1/*"). Empty = any path.
+  string path = 2;
+  // path_type defines how the path should be matched.
+  HttpPathType path_type = 3;
+  // headers are the HTTP headers to match. All specified headers must match.
+  map<string, string> headers = 4;
+  // method is the HTTP method to match.
+  HttpMethod method = 5;
+}
+
+// HealthMonitor defines active health check settings for backend endpoints.
+message HealthMonitor {
+  // interval is the time in seconds between successive health checks.
+  int32 interval = 1;
+  // timeout is the time in seconds to wait for a health check response.
+  int32 timeout = 2;
+  // unhealthy_threshold is the number of consecutive failures before marking
+  // a backend as unhealthy.
+  int32 unhealthy_threshold = 3;
+  // healthy_threshold is the number of consecutive successes before marking
+  // a backend as healthy again.
+  int32 healthy_threshold = 4;
+  // http_health_check_path is the HTTP path used for health checks (only relevant when protocol=HTTP).
+  // Default: "/"
+  string http_health_check_path = 5;
+  // http_health_check_method is the HTTP method used for health checks (only relevant when protocol=HTTP).
+  // Default: GET
+  HttpMethod http_health_check_method = 6;
+  // expected_status_codes lists the HTTP status codes that indicate a healthy backend.
+  // Example: [200, 201, 202]. Default: [200].
+  repeated int32 expected_status_codes = 7;
+}
+
+// Listener defines a single listener on a load balancer.
+// Each listener has its own port, protocol, algorithm, backend refs,
+// health monitor, TLS settings, and optionally an HTTP route (only relevant when protocol=HTTP).
+message Listener {
+  int32 port = 1;
+  Protocol protocol = 2;
+  // algorithm is required – defines how traffic is distributed across backends.
+  Algorithm algorithm = 3;
+  // backend_refs are the upstream endpoints for this listener.
+  repeated BackendRef backend_refs = 4;
+  // http_route is optional. When set with Protocol=HTTP the routing rules are applied.
+  optional HttpRoute http_route = 5;
+  // health_monitor is optional. When set, active health checking is enabled.
+  optional HealthMonitor health_monitor = 6;
+  // id is a server-assigned UUID used to identify this listener (responses / update context).
+  string id = 7;
+  // tls_enabled controls whether TLS is enabled for this listener. Default: false.
+  bool tls_enabled = 8;
+  // tls_cert is the TLS certificate in PEM format. Required when tls_enabled is true.
+  string tls_cert = 9;
+  // tls_key is the TLS private key in PEM format. Required when tls_enabled is true.
+  string tls_key = 10;
+}
+
+// LoadBalancerSpec captures the user-supplied configuration.
+message LoadBalancerSpec {
+  string tenant_id = 1;
+  string network_id = 2;
+  string subnet_id = 3;
+  // listeners defines the set of ports and protocols this LB listens on.
+  repeated Listener listeners = 4;
+  // client_conn_limit is the maximum number of simultaneous client connections.
+  // 0 means unlimited (use the platform default, e.g. 1000).
+  int32 client_conn_limit = 6;
+  // security_group_disabled controls whether a security group is applied.
+  // When true, no security group is applied. When false with empty security_group_id, all traffic is blocked.
+  bool security_group_disabled = 11;
+  // security_group_id is the UUID of the security group to apply.
+  // When security_group_disabled is false and this is empty, all traffic is blocked.
+  string security_group_id = 12;
+  // qos_policy_disabled controls whether a QoS policy is applied.
+  // When true, no QoS policy is applied. When false with empty qos_policy_id, no QoS enforcement.
+  bool qos_policy_disabled = 13;
+  // qos_policy_id is the UUID of the OpenStack QoS policy to apply.
+  // When qos_policy_disabled is false and this is empty, no QoS enforcement.
+  string qos_policy_id = 14;
+}
+
+// LoadBalancerSummary is the lightweight representation used in list responses.
+message LoadBalancerSummary {
+  string id = 1;
+  string name = 2;
+  // ip is empty until the external controller sets it.
+  string ip = 3;
+  State state = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  // Floating IP fields.
+  bool fip_enabled = 11;
+  string fip = 12;
+  FipState fip_state = 13;
+  // fip_network_id is the external network ID used when allocating the FIP.
+  string fip_network_id = 14;
+  // Security & limits.
+  int32 client_conn_limit = 17;
+  // listener_count is the number of listeners configured on this LB.
+  int32 listener_count = 19;
+  // Security group fields.
+  bool security_group_disabled = 20;
+  string security_group_id = 21;
+  // QoS policy fields.
+  bool qos_policy_disabled = 22;
+  string qos_policy_id = 23;
+}
+
+// LoadBalancer is the full representation including spec and error details.
+message LoadBalancer {
+  string id = 1;
+  string name = 2;
+  // ip is the provisioned VIP address (only set when state is READY).
+  string ip = 3;
+  LoadBalancerSpec spec = 4;
+  State state = 5;
+  // error contains a human-readable message when state is FAILED.
+  string error = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  // Floating IP fields.
+  bool fip_enabled = 9;
+  string fip = 10;
+  FipState fip_state = 11;
+  // fip_network_id is the external network ID used when allocating the FIP.
+  string fip_network_id = 12;
+  // Security group fields.
+  bool security_group_disabled = 13;
+  string security_group_id = 14;
+  // QoS policy fields.
+  bool qos_policy_disabled = 15;
+  string qos_policy_id = 16;
+}
+
+// ---------------------------------------------------------------------------
+// Request / Response messages
+// ---------------------------------------------------------------------------
+
+message CreateLoadBalancerRequest {
+  // name is a human-friendly label for the load balancer.
+  string name = 1;
+  LoadBalancerSpec spec = 2;
+  // fip is an optional floating IP to pre-assign during creation.
+  // If non-empty, fip_state will be set to PROVISIONING after creation.
+  optional string fip = 3;
+  // fip_network_id is the external network ID for FIP allocation.
+  // Required when fip field is set (i.e., FIP is enabled).
+  optional string fip_network_id = 4;
+  // idempotency_key prevents duplicate creation on retry. Once set, a LB with
+  // this key exists (in any non-DELETED state). Empty/omitted = no check.
+  optional string idempotency_key = 5;
+}
+
+message CreateLoadBalancerResponse {
+  // id is the database-assigned identifier.
+  string id = 1;
+  // state will always be PENDING on creation.
+  State state = 2;
+}
+
+message GetLoadBalancerRequest {
+  string id = 1;
+}
+
+message GetLoadBalancerResponse {
+  LoadBalancer load_balancer = 1;
+}
+
+message ListLoadBalancersRequest {
+  // tenant_id optionally filters the results. Empty means return all.
+  string tenant_id = 1;
+  // page_size is the maximum number of items per page. Defaults to 50, max 200.
+  int32 page_size = 2;
+  // page_token is an opaque cursor for pagination. Empty means first page.
+  string page_token = 3;
+}
+
+message ListLoadBalancersResponse {
+  repeated LoadBalancerSummary load_balancers = 1;
+  // next_page_token is empty when this is the last page.
+  string next_page_token = 2;
+}
+
+message DeleteLoadBalancerRequest {
+  string id = 1;
+}
+
+message DeleteLoadBalancerResponse {
+  string id = 1;
+  // state will always be DELETING immediately after this call.
+  State state = 2;
+}
+
+message BatchDeleteLoadBalancersResult {
+  string id = 1;
+  bool succeeded = 2;
+  string message = 3;
+}
+
+message BatchDeleteLoadBalancersRequest {
+  repeated string ids = 1;
+}
+
+message BatchDeleteLoadBalancersResponse {
+  repeated BatchDeleteLoadBalancersResult results = 1;
+}
+
+message AllocateFloatingIpRequest {
+  string id = 1;
+  // fip is the floating IP address to assign. Can be left empty to let the
+  // infrastructure auto-assign an address.
+  string fip = 2;
+  // fip_network_id is the external network ID for FIP allocation. Required.
+  string fip_network_id = 3;
+}
+
+message AllocateFloatingIpResponse {
+  string id = 1;
+  FipState fip_state = 2;
+  string fip = 3;
+}
+
+message ReleaseFloatingIpRequest {
+  string id = 1;
+}
+
+message ReleaseFloatingIpResponse {
+  string id = 1;
+  FipState fip_state = 2;
+}
+
+message UpdateLoadBalancerRequest {
+  string id = 1;
+
+  // --- Listeners (full replacement) ---
+  // Send the complete desired list of listeners. Existing listeners are
+  // replaced entirely. Health monitor is per-listener.
+  repeated Listener listeners = 2;
+
+  // --- Traffic shaping ---
+  optional int32 client_conn_limit = 9;
+
+  // --- Security group ---
+  // When present, security_group_disabled + security_group_id are applied as-is.
+  optional bool security_group_disabled = 13;
+  optional string security_group_id = 14;
+
+  // --- QoS policy ---
+  // When present, qos_policy_disabled + qos_policy_id are applied as-is.
+  optional bool qos_policy_disabled = 15;
+  optional string qos_policy_id = 16;
+}
+
+message UpdateLoadBalancerResponse {
+  string id = 1;
+  State state = 2;
+}
