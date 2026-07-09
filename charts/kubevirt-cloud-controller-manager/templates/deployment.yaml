@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kubevirt-cloud-controller-manager
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kubevirt-cloud-controller-manager.labels" . | nindent 4 }}
     k8s-app: kubevirt-cloud-controller-manager
@@ -26,6 +26,9 @@ spec:
         - --authentication-skip-lookup=true
         {{- if .Values.clusterName }}
         - --cluster-name={{ .Values.clusterName }}
+        {{- end }}
+        {{- if .Values.onlyServiceController }}
+        - --controllers=*,-cloud-node,-cloud-node-lifecycle,-route
         {{- end }}
         command:
         - /bin/kubevirt-cloud-controller-manager

@@ -280,6 +280,7 @@ var _ = Describe("LoadBalancer", func() {
 			svc := newTenantService()
 
 			gomock.InOrder(
+				// ensureServiceAnnotation for LB ID: Get + Update
 				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
 					svc.DeepCopyInto(obj.(*corev1.Service))
 					return nil
@@ -289,6 +290,7 @@ var _ = Describe("LoadBalancer", func() {
 					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-new"))
 					return nil
 				}),
+				// ensureServiceAnnotation for create count: Get + Update
 				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
 					svc.DeepCopyInto(obj.(*corev1.Service))
 					return nil
@@ -298,6 +300,7 @@ var _ = Describe("LoadBalancer", func() {
 					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerCreateCountAnnotationKey, "1"))
 					return nil
 				}),
+				// ensureServiceAnnotation for listener hash: Get + Update
 				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
 					svc.DeepCopyInto(obj.(*corev1.Service))
 					return nil
@@ -367,6 +370,122 @@ var _ = Describe("LoadBalancer", func() {
 			svc := newTenantService()
 			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should create load balancer in internal mode with internal IP as status", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-internal",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:    "lb-internal",
+						Ip:    "10.0.0.50",
+						State: loadbalancerv1.State_STATE_READY,
+					},
+				},
+			}
+			lb.config.IpType = "internal"
+			lb.config.FipNetworkID = ""
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("10.0.0.50"))
+		})
+
+		It("Should create load balancer in both mode with FIP as status and internal IP as annotation", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-both",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-both",
+						Ip:       "10.0.0.60",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.10",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+			}
+			lb.config.IpType = "both"
+			lb.config.FipNetworkID = "fip-net"
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-both"))
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				// storeInternalIpIfBothMode: Get + Update for internal IP annotation
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerInternalIPAnnotationKey, "10.0.0.60"))
+					return nil
+				}),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.10"))
 		})
 
 		AfterEach(func() {

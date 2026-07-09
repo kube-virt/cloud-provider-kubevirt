@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cloud-config
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kubevirt-cloud-controller-manager.labels" . | nindent 4 }}
 data:
@@ -17,7 +17,8 @@ data:
       subnetID: {{ .Values.subnetID }}
       tenantID: {{ .Values.tenantID }}
       fipNetworkID: {{ .Values.fipNetworkID }}
-    namespace: {{ .Values.namespace }}
+      ipType: {{ .Values.ipType }}
+    namespace: {{ .Release.Namespace }}
     instancesV2:
       enabled: {{ .Values.cloudConfig.instancesV2.enabled }}
       zoneAndRegionEnabled: {{ .Values.cloudConfig.instancesV2.zoneAndRegionEnabled }}

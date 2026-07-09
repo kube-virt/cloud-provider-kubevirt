@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.30.0
-// source: loadbalancer.proto
+// source: pkg/rpc/loadbalancer/gen/loadbalancer.proto
 
 package loadbalancerv1
 
@@ -70,11 +70,11 @@ func (x State) String() string {
 }
 
 func (State) Descriptor() protoreflect.EnumDescriptor {
-	return file_loadbalancer_proto_enumTypes[0].Descriptor()
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[0].Descriptor()
 }
 
 func (State) Type() protoreflect.EnumType {
-	return &file_loadbalancer_proto_enumTypes[0]
+	return &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[0]
 }
 
 func (x State) Number() protoreflect.EnumNumber {
@@ -83,7 +83,7 @@ func (x State) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use State.Descriptor instead.
 func (State) EnumDescriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{0}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{0}
 }
 
 // Algorithm defines the load balancing strategy for distributing traffic
@@ -127,11 +127,11 @@ func (x Algorithm) String() string {
 }
 
 func (Algorithm) Descriptor() protoreflect.EnumDescriptor {
-	return file_loadbalancer_proto_enumTypes[1].Descriptor()
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[1].Descriptor()
 }
 
 func (Algorithm) Type() protoreflect.EnumType {
-	return &file_loadbalancer_proto_enumTypes[1]
+	return &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[1]
 }
 
 func (x Algorithm) Number() protoreflect.EnumNumber {
@@ -140,7 +140,7 @@ func (x Algorithm) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Algorithm.Descriptor instead.
 func (Algorithm) EnumDescriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{1}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{1}
 }
 
 // Protocol defines the transport protocol for the load balancer listener.
@@ -180,11 +180,11 @@ func (x Protocol) String() string {
 }
 
 func (Protocol) Descriptor() protoreflect.EnumDescriptor {
-	return file_loadbalancer_proto_enumTypes[2].Descriptor()
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[2].Descriptor()
 }
 
 func (Protocol) Type() protoreflect.EnumType {
-	return &file_loadbalancer_proto_enumTypes[2]
+	return &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[2]
 }
 
 func (x Protocol) Number() protoreflect.EnumNumber {
@@ -193,7 +193,7 @@ func (x Protocol) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Protocol.Descriptor instead.
 func (Protocol) EnumDescriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{2}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{2}
 }
 
 // FipState describes the lifecycle state of a floating IP assignment.
@@ -237,11 +237,11 @@ func (x HttpPathType) String() string {
 }
 
 func (HttpPathType) Descriptor() protoreflect.EnumDescriptor {
-	return file_loadbalancer_proto_enumTypes[3].Descriptor()
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[3].Descriptor()
 }
 
 func (HttpPathType) Type() protoreflect.EnumType {
-	return &file_loadbalancer_proto_enumTypes[3]
+	return &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[3]
 }
 
 func (x HttpPathType) Number() protoreflect.EnumNumber {
@@ -250,7 +250,7 @@ func (x HttpPathType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use HttpPathType.Descriptor instead.
 func (HttpPathType) EnumDescriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{3}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{3}
 }
 
 // HttpMethod defines the HTTP request method.
@@ -302,11 +302,11 @@ func (x HttpMethod) String() string {
 }
 
 func (HttpMethod) Descriptor() protoreflect.EnumDescriptor {
-	return file_loadbalancer_proto_enumTypes[4].Descriptor()
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[4].Descriptor()
 }
 
 func (HttpMethod) Type() protoreflect.EnumType {
-	return &file_loadbalancer_proto_enumTypes[4]
+	return &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[4]
 }
 
 func (x HttpMethod) Number() protoreflect.EnumNumber {
@@ -315,7 +315,7 @@ func (x HttpMethod) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use HttpMethod.Descriptor instead.
 func (HttpMethod) EnumDescriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{4}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{4}
 }
 
 type FipState int32
@@ -361,11 +361,11 @@ func (x FipState) String() string {
 }
 
 func (FipState) Descriptor() protoreflect.EnumDescriptor {
-	return file_loadbalancer_proto_enumTypes[5].Descriptor()
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[5].Descriptor()
 }
 
 func (FipState) Type() protoreflect.EnumType {
-	return &file_loadbalancer_proto_enumTypes[5]
+	return &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes[5]
 }
 
 func (x FipState) Number() protoreflect.EnumNumber {
@@ -374,7 +374,7 @@ func (x FipState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FipState.Descriptor instead.
 func (FipState) EnumDescriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{5}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{5}
 }
 
 // BackendRef is a single upstream endpoint the load balancer forwards to.
@@ -388,7 +388,7 @@ type BackendRef struct {
 
 func (x *BackendRef) Reset() {
 	*x = BackendRef{}
-	mi := &file_loadbalancer_proto_msgTypes[0]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -400,7 +400,7 @@ func (x *BackendRef) String() string {
 func (*BackendRef) ProtoMessage() {}
 
 func (x *BackendRef) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[0]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -413,7 +413,7 @@ func (x *BackendRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackendRef.ProtoReflect.Descriptor instead.
 func (*BackendRef) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{0}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *BackendRef) GetIp() string {
@@ -450,7 +450,7 @@ type HttpRoute struct {
 
 func (x *HttpRoute) Reset() {
 	*x = HttpRoute{}
-	mi := &file_loadbalancer_proto_msgTypes[1]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -462,7 +462,7 @@ func (x *HttpRoute) String() string {
 func (*HttpRoute) ProtoMessage() {}
 
 func (x *HttpRoute) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[1]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -475,7 +475,7 @@ func (x *HttpRoute) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HttpRoute.ProtoReflect.Descriptor instead.
 func (*HttpRoute) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{1}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *HttpRoute) GetHost() string {
@@ -541,7 +541,7 @@ type HealthMonitor struct {
 
 func (x *HealthMonitor) Reset() {
 	*x = HealthMonitor{}
-	mi := &file_loadbalancer_proto_msgTypes[2]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -553,7 +553,7 @@ func (x *HealthMonitor) String() string {
 func (*HealthMonitor) ProtoMessage() {}
 
 func (x *HealthMonitor) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[2]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -566,7 +566,7 @@ func (x *HealthMonitor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthMonitor.ProtoReflect.Descriptor instead.
 func (*HealthMonitor) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{2}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *HealthMonitor) GetInterval() int32 {
@@ -647,7 +647,7 @@ type Listener struct {
 
 func (x *Listener) Reset() {
 	*x = Listener{}
-	mi := &file_loadbalancer_proto_msgTypes[3]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -659,7 +659,7 @@ func (x *Listener) String() string {
 func (*Listener) ProtoMessage() {}
 
 func (x *Listener) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[3]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -672,7 +672,7 @@ func (x *Listener) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Listener.ProtoReflect.Descriptor instead.
 func (*Listener) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{3}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Listener) GetPort() int32 {
@@ -774,7 +774,7 @@ type LoadBalancerSpec struct {
 
 func (x *LoadBalancerSpec) Reset() {
 	*x = LoadBalancerSpec{}
-	mi := &file_loadbalancer_proto_msgTypes[4]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +786,7 @@ func (x *LoadBalancerSpec) String() string {
 func (*LoadBalancerSpec) ProtoMessage() {}
 
 func (x *LoadBalancerSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[4]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +799,7 @@ func (x *LoadBalancerSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalancerSpec.ProtoReflect.Descriptor instead.
 func (*LoadBalancerSpec) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{4}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *LoadBalancerSpec) GetTenantId() string {
@@ -897,7 +897,7 @@ type LoadBalancerSummary struct {
 
 func (x *LoadBalancerSummary) Reset() {
 	*x = LoadBalancerSummary{}
-	mi := &file_loadbalancer_proto_msgTypes[5]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -909,7 +909,7 @@ func (x *LoadBalancerSummary) String() string {
 func (*LoadBalancerSummary) ProtoMessage() {}
 
 func (x *LoadBalancerSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[5]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -922,7 +922,7 @@ func (x *LoadBalancerSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalancerSummary.ProtoReflect.Descriptor instead.
 func (*LoadBalancerSummary) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{5}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *LoadBalancerSummary) GetId() string {
@@ -1068,7 +1068,7 @@ type LoadBalancer struct {
 
 func (x *LoadBalancer) Reset() {
 	*x = LoadBalancer{}
-	mi := &file_loadbalancer_proto_msgTypes[6]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1080,7 +1080,7 @@ func (x *LoadBalancer) String() string {
 func (*LoadBalancer) ProtoMessage() {}
 
 func (x *LoadBalancer) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[6]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1093,7 +1093,7 @@ func (x *LoadBalancer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalancer.ProtoReflect.Descriptor instead.
 func (*LoadBalancer) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{6}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LoadBalancer) GetId() string {
@@ -1219,16 +1219,15 @@ type CreateLoadBalancerRequest struct {
 	// fip_network_id is the external network ID for FIP allocation.
 	// Required when fip field is set (i.e., FIP is enabled).
 	FipNetworkId *string `protobuf:"bytes,4,opt,name=fip_network_id,json=fipNetworkId,proto3,oneof" json:"fip_network_id,omitempty"`
-	// idempotency_key prevents duplicate creation on retry. Once set, a LB with
-	// this key exists (in any non-DELETED state). Empty/omitted = no check.
-	IdempotencyKey *string `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3,oneof" json:"idempotency_key,omitempty"`
+	// idempotency_key prevents duplicate creation on retry.
+	IdempotencyKey string `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CreateLoadBalancerRequest) Reset() {
 	*x = CreateLoadBalancerRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[7]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1240,7 +1239,7 @@ func (x *CreateLoadBalancerRequest) String() string {
 func (*CreateLoadBalancerRequest) ProtoMessage() {}
 
 func (x *CreateLoadBalancerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[7]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1253,7 +1252,7 @@ func (x *CreateLoadBalancerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLoadBalancerRequest.ProtoReflect.Descriptor instead.
 func (*CreateLoadBalancerRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{7}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateLoadBalancerRequest) GetName() string {
@@ -1285,8 +1284,8 @@ func (x *CreateLoadBalancerRequest) GetFipNetworkId() string {
 }
 
 func (x *CreateLoadBalancerRequest) GetIdempotencyKey() string {
-	if x != nil && x.IdempotencyKey != nil {
-		return *x.IdempotencyKey
+	if x != nil {
+		return x.IdempotencyKey
 	}
 	return ""
 }
@@ -1303,7 +1302,7 @@ type CreateLoadBalancerResponse struct {
 
 func (x *CreateLoadBalancerResponse) Reset() {
 	*x = CreateLoadBalancerResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[8]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1314,7 @@ func (x *CreateLoadBalancerResponse) String() string {
 func (*CreateLoadBalancerResponse) ProtoMessage() {}
 
 func (x *CreateLoadBalancerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[8]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1328,7 +1327,7 @@ func (x *CreateLoadBalancerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLoadBalancerResponse.ProtoReflect.Descriptor instead.
 func (*CreateLoadBalancerResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{8}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CreateLoadBalancerResponse) GetId() string {
@@ -1354,7 +1353,7 @@ type GetLoadBalancerRequest struct {
 
 func (x *GetLoadBalancerRequest) Reset() {
 	*x = GetLoadBalancerRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[9]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1366,7 +1365,7 @@ func (x *GetLoadBalancerRequest) String() string {
 func (*GetLoadBalancerRequest) ProtoMessage() {}
 
 func (x *GetLoadBalancerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[9]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1379,7 +1378,7 @@ func (x *GetLoadBalancerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLoadBalancerRequest.ProtoReflect.Descriptor instead.
 func (*GetLoadBalancerRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{9}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetLoadBalancerRequest) GetId() string {
@@ -1398,7 +1397,7 @@ type GetLoadBalancerResponse struct {
 
 func (x *GetLoadBalancerResponse) Reset() {
 	*x = GetLoadBalancerResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[10]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1409,7 @@ func (x *GetLoadBalancerResponse) String() string {
 func (*GetLoadBalancerResponse) ProtoMessage() {}
 
 func (x *GetLoadBalancerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[10]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1422,7 @@ func (x *GetLoadBalancerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLoadBalancerResponse.ProtoReflect.Descriptor instead.
 func (*GetLoadBalancerResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{10}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetLoadBalancerResponse) GetLoadBalancer() *LoadBalancer {
@@ -1447,7 +1446,7 @@ type ListLoadBalancersRequest struct {
 
 func (x *ListLoadBalancersRequest) Reset() {
 	*x = ListLoadBalancersRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[11]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1459,7 +1458,7 @@ func (x *ListLoadBalancersRequest) String() string {
 func (*ListLoadBalancersRequest) ProtoMessage() {}
 
 func (x *ListLoadBalancersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[11]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1472,7 +1471,7 @@ func (x *ListLoadBalancersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLoadBalancersRequest.ProtoReflect.Descriptor instead.
 func (*ListLoadBalancersRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{11}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListLoadBalancersRequest) GetTenantId() string {
@@ -1507,7 +1506,7 @@ type ListLoadBalancersResponse struct {
 
 func (x *ListLoadBalancersResponse) Reset() {
 	*x = ListLoadBalancersResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[12]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1519,7 +1518,7 @@ func (x *ListLoadBalancersResponse) String() string {
 func (*ListLoadBalancersResponse) ProtoMessage() {}
 
 func (x *ListLoadBalancersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[12]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1532,7 +1531,7 @@ func (x *ListLoadBalancersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLoadBalancersResponse.ProtoReflect.Descriptor instead.
 func (*ListLoadBalancersResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{12}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListLoadBalancersResponse) GetLoadBalancers() []*LoadBalancerSummary {
@@ -1558,7 +1557,7 @@ type DeleteLoadBalancerRequest struct {
 
 func (x *DeleteLoadBalancerRequest) Reset() {
 	*x = DeleteLoadBalancerRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[13]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1570,7 +1569,7 @@ func (x *DeleteLoadBalancerRequest) String() string {
 func (*DeleteLoadBalancerRequest) ProtoMessage() {}
 
 func (x *DeleteLoadBalancerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[13]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1583,7 +1582,7 @@ func (x *DeleteLoadBalancerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteLoadBalancerRequest.ProtoReflect.Descriptor instead.
 func (*DeleteLoadBalancerRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{13}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DeleteLoadBalancerRequest) GetId() string {
@@ -1604,7 +1603,7 @@ type DeleteLoadBalancerResponse struct {
 
 func (x *DeleteLoadBalancerResponse) Reset() {
 	*x = DeleteLoadBalancerResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[14]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1616,7 +1615,7 @@ func (x *DeleteLoadBalancerResponse) String() string {
 func (*DeleteLoadBalancerResponse) ProtoMessage() {}
 
 func (x *DeleteLoadBalancerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[14]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1629,7 +1628,7 @@ func (x *DeleteLoadBalancerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteLoadBalancerResponse.ProtoReflect.Descriptor instead.
 func (*DeleteLoadBalancerResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{14}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteLoadBalancerResponse) GetId() string {
@@ -1657,7 +1656,7 @@ type BatchDeleteLoadBalancersResult struct {
 
 func (x *BatchDeleteLoadBalancersResult) Reset() {
 	*x = BatchDeleteLoadBalancersResult{}
-	mi := &file_loadbalancer_proto_msgTypes[15]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1669,7 +1668,7 @@ func (x *BatchDeleteLoadBalancersResult) String() string {
 func (*BatchDeleteLoadBalancersResult) ProtoMessage() {}
 
 func (x *BatchDeleteLoadBalancersResult) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[15]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1682,7 +1681,7 @@ func (x *BatchDeleteLoadBalancersResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchDeleteLoadBalancersResult.ProtoReflect.Descriptor instead.
 func (*BatchDeleteLoadBalancersResult) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{15}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *BatchDeleteLoadBalancersResult) GetId() string {
@@ -1715,7 +1714,7 @@ type BatchDeleteLoadBalancersRequest struct {
 
 func (x *BatchDeleteLoadBalancersRequest) Reset() {
 	*x = BatchDeleteLoadBalancersRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[16]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1727,7 +1726,7 @@ func (x *BatchDeleteLoadBalancersRequest) String() string {
 func (*BatchDeleteLoadBalancersRequest) ProtoMessage() {}
 
 func (x *BatchDeleteLoadBalancersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[16]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1740,7 +1739,7 @@ func (x *BatchDeleteLoadBalancersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchDeleteLoadBalancersRequest.ProtoReflect.Descriptor instead.
 func (*BatchDeleteLoadBalancersRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{16}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *BatchDeleteLoadBalancersRequest) GetIds() []string {
@@ -1759,7 +1758,7 @@ type BatchDeleteLoadBalancersResponse struct {
 
 func (x *BatchDeleteLoadBalancersResponse) Reset() {
 	*x = BatchDeleteLoadBalancersResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[17]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1771,7 +1770,7 @@ func (x *BatchDeleteLoadBalancersResponse) String() string {
 func (*BatchDeleteLoadBalancersResponse) ProtoMessage() {}
 
 func (x *BatchDeleteLoadBalancersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[17]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1784,7 +1783,7 @@ func (x *BatchDeleteLoadBalancersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchDeleteLoadBalancersResponse.ProtoReflect.Descriptor instead.
 func (*BatchDeleteLoadBalancersResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{17}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *BatchDeleteLoadBalancersResponse) GetResults() []*BatchDeleteLoadBalancersResult {
@@ -1808,7 +1807,7 @@ type AllocateFloatingIpRequest struct {
 
 func (x *AllocateFloatingIpRequest) Reset() {
 	*x = AllocateFloatingIpRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[18]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1820,7 +1819,7 @@ func (x *AllocateFloatingIpRequest) String() string {
 func (*AllocateFloatingIpRequest) ProtoMessage() {}
 
 func (x *AllocateFloatingIpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[18]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1833,7 +1832,7 @@ func (x *AllocateFloatingIpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocateFloatingIpRequest.ProtoReflect.Descriptor instead.
 func (*AllocateFloatingIpRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{18}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AllocateFloatingIpRequest) GetId() string {
@@ -1868,7 +1867,7 @@ type AllocateFloatingIpResponse struct {
 
 func (x *AllocateFloatingIpResponse) Reset() {
 	*x = AllocateFloatingIpResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[19]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1880,7 +1879,7 @@ func (x *AllocateFloatingIpResponse) String() string {
 func (*AllocateFloatingIpResponse) ProtoMessage() {}
 
 func (x *AllocateFloatingIpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[19]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1893,7 +1892,7 @@ func (x *AllocateFloatingIpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AllocateFloatingIpResponse.ProtoReflect.Descriptor instead.
 func (*AllocateFloatingIpResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{19}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AllocateFloatingIpResponse) GetId() string {
@@ -1926,7 +1925,7 @@ type ReleaseFloatingIpRequest struct {
 
 func (x *ReleaseFloatingIpRequest) Reset() {
 	*x = ReleaseFloatingIpRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[20]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1938,7 +1937,7 @@ func (x *ReleaseFloatingIpRequest) String() string {
 func (*ReleaseFloatingIpRequest) ProtoMessage() {}
 
 func (x *ReleaseFloatingIpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[20]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1951,7 +1950,7 @@ func (x *ReleaseFloatingIpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseFloatingIpRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseFloatingIpRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{20}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ReleaseFloatingIpRequest) GetId() string {
@@ -1971,7 +1970,7 @@ type ReleaseFloatingIpResponse struct {
 
 func (x *ReleaseFloatingIpResponse) Reset() {
 	*x = ReleaseFloatingIpResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[21]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1983,7 +1982,7 @@ func (x *ReleaseFloatingIpResponse) String() string {
 func (*ReleaseFloatingIpResponse) ProtoMessage() {}
 
 func (x *ReleaseFloatingIpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[21]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1996,7 +1995,7 @@ func (x *ReleaseFloatingIpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseFloatingIpResponse.ProtoReflect.Descriptor instead.
 func (*ReleaseFloatingIpResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{21}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReleaseFloatingIpResponse) GetId() string {
@@ -2036,7 +2035,7 @@ type UpdateLoadBalancerRequest struct {
 
 func (x *UpdateLoadBalancerRequest) Reset() {
 	*x = UpdateLoadBalancerRequest{}
-	mi := &file_loadbalancer_proto_msgTypes[22]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2048,7 +2047,7 @@ func (x *UpdateLoadBalancerRequest) String() string {
 func (*UpdateLoadBalancerRequest) ProtoMessage() {}
 
 func (x *UpdateLoadBalancerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[22]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2061,7 +2060,7 @@ func (x *UpdateLoadBalancerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLoadBalancerRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLoadBalancerRequest) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{22}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UpdateLoadBalancerRequest) GetId() string {
@@ -2123,7 +2122,7 @@ type UpdateLoadBalancerResponse struct {
 
 func (x *UpdateLoadBalancerResponse) Reset() {
 	*x = UpdateLoadBalancerResponse{}
-	mi := &file_loadbalancer_proto_msgTypes[23]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2135,7 +2134,7 @@ func (x *UpdateLoadBalancerResponse) String() string {
 func (*UpdateLoadBalancerResponse) ProtoMessage() {}
 
 func (x *UpdateLoadBalancerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_loadbalancer_proto_msgTypes[23]
+	mi := &file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2148,7 +2147,7 @@ func (x *UpdateLoadBalancerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLoadBalancerResponse.ProtoReflect.Descriptor instead.
 func (*UpdateLoadBalancerResponse) Descriptor() ([]byte, []int) {
-	return file_loadbalancer_proto_rawDescGZIP(), []int{23}
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UpdateLoadBalancerResponse) GetId() string {
@@ -2165,11 +2164,11 @@ func (x *UpdateLoadBalancerResponse) GetState() State {
 	return State_STATE_UNSPECIFIED
 }
 
-var File_loadbalancer_proto protoreflect.FileDescriptor
+var File_pkg_rpc_loadbalancer_gen_loadbalancer_proto protoreflect.FileDescriptor
 
-const file_loadbalancer_proto_rawDesc = "" +
+const file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDesc = "" +
 	"\n" +
-	"\x12loadbalancer.proto\x12\x0floadbalancer.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"0\n" +
+	"+pkg/rpc/loadbalancer/gen/loadbalancer.proto\x12\x0floadbalancer.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"0\n" +
 	"\n" +
 	"BackendRef\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x12\n" +
@@ -2258,16 +2257,15 @@ const file_loadbalancer_proto_rawDesc = "" +
 	"\x17security_group_disabled\x18\r \x01(\bR\x15securityGroupDisabled\x12*\n" +
 	"\x11security_group_id\x18\x0e \x01(\tR\x0fsecurityGroupId\x12.\n" +
 	"\x13qos_policy_disabled\x18\x0f \x01(\bR\x11qosPolicyDisabled\x12\"\n" +
-	"\rqos_policy_id\x18\x10 \x01(\tR\vqosPolicyId\"\x85\x02\n" +
+	"\rqos_policy_id\x18\x10 \x01(\tR\vqosPolicyId\"\xec\x01\n" +
 	"\x19CreateLoadBalancerRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x125\n" +
 	"\x04spec\x18\x02 \x01(\v2!.loadbalancer.v1.LoadBalancerSpecR\x04spec\x12\x15\n" +
 	"\x03fip\x18\x03 \x01(\tH\x00R\x03fip\x88\x01\x01\x12)\n" +
-	"\x0efip_network_id\x18\x04 \x01(\tH\x01R\ffipNetworkId\x88\x01\x01\x12,\n" +
-	"\x0fidempotency_key\x18\x05 \x01(\tH\x02R\x0eidempotencyKey\x88\x01\x01B\x06\n" +
+	"\x0efip_network_id\x18\x04 \x01(\tH\x01R\ffipNetworkId\x88\x01\x01\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKeyB\x06\n" +
 	"\x04_fipB\x11\n" +
-	"\x0f_fip_network_idB\x12\n" +
-	"\x10_idempotency_key\"Z\n" +
+	"\x0f_fip_network_id\"Z\n" +
 	"\x1aCreateLoadBalancerResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12,\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x16.loadbalancer.v1.StateR\x05state\"(\n" +
@@ -2377,20 +2375,20 @@ const file_loadbalancer_proto_rawDesc = "" +
 	"\x12UpdateLoadBalancer\x12*.loadbalancer.v1.UpdateLoadBalancerRequest\x1a+.loadbalancer.v1.UpdateLoadBalancerResponseBMZKkubevirt.io/cloud-provider-kubevirt/pkg/rpc/loadbalancer/gen;loadbalancerv1b\x06proto3"
 
 var (
-	file_loadbalancer_proto_rawDescOnce sync.Once
-	file_loadbalancer_proto_rawDescData []byte
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescOnce sync.Once
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescData []byte
 )
 
-func file_loadbalancer_proto_rawDescGZIP() []byte {
-	file_loadbalancer_proto_rawDescOnce.Do(func() {
-		file_loadbalancer_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_loadbalancer_proto_rawDesc), len(file_loadbalancer_proto_rawDesc)))
+func file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescGZIP() []byte {
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescOnce.Do(func() {
+		file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDesc), len(file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDesc)))
 	})
-	return file_loadbalancer_proto_rawDescData
+	return file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescData
 }
 
-var file_loadbalancer_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_loadbalancer_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
-var file_loadbalancer_proto_goTypes = []any{
+var file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_goTypes = []any{
 	(State)(0),                               // 0: loadbalancer.v1.State
 	(Algorithm)(0),                           // 1: loadbalancer.v1.Algorithm
 	(Protocol)(0),                            // 2: loadbalancer.v1.Protocol
@@ -2424,7 +2422,7 @@ var file_loadbalancer_proto_goTypes = []any{
 	nil,                                      // 30: loadbalancer.v1.HttpRoute.HeadersEntry
 	(*timestamppb.Timestamp)(nil),            // 31: google.protobuf.Timestamp
 }
-var file_loadbalancer_proto_depIdxs = []int32{
+var file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_depIdxs = []int32{
 	3,  // 0: loadbalancer.v1.HttpRoute.path_type:type_name -> loadbalancer.v1.HttpPathType
 	30, // 1: loadbalancer.v1.HttpRoute.headers:type_name -> loadbalancer.v1.HttpRoute.HeadersEntry
 	4,  // 2: loadbalancer.v1.HttpRoute.method:type_name -> loadbalancer.v1.HttpMethod
@@ -2477,30 +2475,30 @@ var file_loadbalancer_proto_depIdxs = []int32{
 	0,  // [0:29] is the sub-list for field type_name
 }
 
-func init() { file_loadbalancer_proto_init() }
-func file_loadbalancer_proto_init() {
-	if File_loadbalancer_proto != nil {
+func init() { file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_init() }
+func file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_init() {
+	if File_pkg_rpc_loadbalancer_gen_loadbalancer_proto != nil {
 		return
 	}
-	file_loadbalancer_proto_msgTypes[3].OneofWrappers = []any{}
-	file_loadbalancer_proto_msgTypes[7].OneofWrappers = []any{}
-	file_loadbalancer_proto_msgTypes[22].OneofWrappers = []any{}
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[3].OneofWrappers = []any{}
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[7].OneofWrappers = []any{}
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes[22].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_loadbalancer_proto_rawDesc), len(file_loadbalancer_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDesc), len(file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDesc)),
 			NumEnums:      6,
 			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_loadbalancer_proto_goTypes,
-		DependencyIndexes: file_loadbalancer_proto_depIdxs,
-		EnumInfos:         file_loadbalancer_proto_enumTypes,
-		MessageInfos:      file_loadbalancer_proto_msgTypes,
+		GoTypes:           file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_goTypes,
+		DependencyIndexes: file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_depIdxs,
+		EnumInfos:         file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_enumTypes,
+		MessageInfos:      file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_msgTypes,
 	}.Build()
-	File_loadbalancer_proto = out.File
-	file_loadbalancer_proto_goTypes = nil
-	file_loadbalancer_proto_depIdxs = nil
+	File_pkg_rpc_loadbalancer_gen_loadbalancer_proto = out.File
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_goTypes = nil
+	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_depIdxs = nil
 }

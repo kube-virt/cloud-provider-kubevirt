@@ -34,9 +34,10 @@ const (
 	TenantServiceNamespaceLabelKey   = "cluster.x-k8s.io/tenant-service-namespace"
 	TenantClusterNameLabelKey        = "cluster.x-k8s.io/cluster-name"
 	TenantNodeRoleLabelKey           = "cluster.x-k8s.io/role"
-	LoadBalancerIDAnnotationKey          = "kubevirt.io/loadbalancer-id"
-	LoadBalancerCreateCountAnnotationKey = "kubevirt.io/loadbalancer-create-count"
+	LoadBalancerIDAnnotationKey           = "kubevirt.io/loadbalancer-id"
+	LoadBalancerCreateCountAnnotationKey  = "kubevirt.io/loadbalancer-create-count"
 	LoadBalancerListenerHashAnnotationKey = "kubevirt.io/loadbalancer-listener-hash"
+	LoadBalancerInternalIPAnnotationKey   = "kubevirt.io/loadbalancer-internal-ip"
 	HTTPRoutePathAnnotationKey            = "kubevirt.io/http-path"
 	HTTPRouteMethodAnnotationKey          = "kubevirt.io/http-method"
 	LoadBalancerFinalizer                 = "service.kubernetes.io/load-balancer-cleanup"
@@ -133,7 +134,7 @@ func (lb *loadbalancer) pollLoadBalancerReady(ctx context.Context, lbID string) 
 
 		lbStatus := resp.GetLoadBalancer()
 		if lbStatus != nil && lbStatus.State == loadbalancerv1.State_STATE_READY && lbStatus.Ip != "" {
-			if lb.config.FipNetworkID == "" || lbStatus.FipState == loadbalancerv1.FipState_FIP_STATE_ACTIVE {
+			if !lb.isFipEnabled() || lbStatus.FipState == loadbalancerv1.FipState_FIP_STATE_ACTIVE {
 				return lbStatus, nil
 			}
 		}
@@ -166,7 +167,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	listeners := lb.buildListeners(ctx, service, nodes, clusterName)
 	if lbID == "" {
-		if lb.config.FipNetworkID == "" {
+		if lb.isFipEnabled() && lb.config.FipNetworkID == "" {
 			return nil, fmt.Errorf("FIP network ID is not configured; load balancer creation requires floating IP support")
 		}
 
@@ -188,10 +189,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		createReq := &loadbalancerv1.CreateLoadBalancerRequest{
 			Name:           lbName,
 			Spec:           spec,
-			IdempotencyKey: pointer.String(string(service.UID)),
+			IdempotencyKey: string(service.UID),
 		}
 
-		if lb.config.FipNetworkID != "" {
+		if lb.isFipEnabled() && lb.config.FipNetworkID != "" {
 			createReq.Fip = pointer.String("")
 			createReq.FipNetworkId = &lb.config.FipNetworkID
 		}
@@ -217,6 +218,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		if err != nil {
 			return nil, err
 		}
+		lb.storeInternalIpIfBothMode(ctx, service, lbStatus)
 		return lb.loadBalancerStatusFromResponse(lbStatus), nil
 	}
 
@@ -245,14 +247,16 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			if err != nil {
 				return nil, err
 			}
+			lb.storeInternalIpIfBothMode(ctx, service, lbStatus)
 			return lb.loadBalancerStatusFromResponse(lbStatus), nil
 		}
 
-		if lb.config.FipNetworkID != "" && lbStatus.FipState != loadbalancerv1.FipState_FIP_STATE_ACTIVE {
+		if lb.isFipEnabled() && lbStatus.FipState != loadbalancerv1.FipState_FIP_STATE_ACTIVE {
 			lbStatus, err := lb.pollLoadBalancerReady(ctx, lbID)
 			if err != nil {
 				return nil, err
 			}
+			lb.storeInternalIpIfBothMode(ctx, service, lbStatus)
 			return lb.loadBalancerStatusFromResponse(lbStatus), nil
 		}
 
@@ -273,7 +277,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 		klog.Warningf("Load balancer %s not ready after %d retries, recreating (attempt %d)", lbID, maxLoadBalancerRetries, createCount+1)
 
-		if lb.config.FipNetworkID == "" {
+		if lb.isFipEnabled() && lb.config.FipNetworkID == "" {
 			return nil, fmt.Errorf("FIP network ID is not configured; load balancer recreation requires floating IP support")
 		}
 
@@ -295,9 +299,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 				SecurityGroupDisabled: true,
 				QosPolicyDisabled:     true,
 			},
+			IdempotencyKey: string(service.UID),
 		}
 
-		if lb.config.FipNetworkID != "" {
+		if lb.isFipEnabled() && lb.config.FipNetworkID != "" {
 			createReq.Fip = pointer.String("")
 			createReq.FipNetworkId = &lb.config.FipNetworkID
 		}
@@ -320,6 +325,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		if err != nil {
 			return nil, err
 		}
+		lb.storeInternalIpIfBothMode(ctx, service, lbStatus)
 		return lb.loadBalancerStatusFromResponse(lbStatus), nil
 	}
 
@@ -341,6 +347,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		if err != nil {
 			return nil, err
 		}
+		lb.storeInternalIpIfBothMode(ctx, service, lbStatus)
 		return lb.loadBalancerStatusFromResponse(lbStatus), nil
 	}
 
@@ -366,6 +373,27 @@ func (lb *loadbalancer) clearRetryCount(uid string) {
 	lb.mu.Unlock()
 }
 
+func (lb *loadbalancer) isFipEnabled() bool {
+	ipType := strings.ToLower(lb.config.IpType)
+	return ipType == "" || ipType == "external" || ipType == "both"
+}
+
+func (lb *loadbalancer) isInternalMode() bool {
+	return strings.ToLower(lb.config.IpType) == "internal"
+}
+
+func (lb *loadbalancer) isBothMode() bool {
+	return strings.ToLower(lb.config.IpType) == "both"
+}
+
+func (lb *loadbalancer) storeInternalIpIfBothMode(ctx context.Context, service *corev1.Service, lbStatus *loadbalancerv1.LoadBalancer) {
+	if lb.isBothMode() && lbStatus != nil && lbStatus.Ip != "" {
+		if err := lb.ensureServiceAnnotation(ctx, service, LoadBalancerInternalIPAnnotationKey, lbStatus.Ip); err != nil {
+			klog.Errorf("Failed to store internal IP annotation: %v", err)
+		}
+	}
+}
+
 func listenersHashStr(listeners []*loadbalancerv1.Listener) string {
 	data, err := json.Marshal(listeners)
 	if err != nil {
@@ -384,7 +412,7 @@ func (lb *loadbalancer) loadBalancerStatusFromResponse(lbStatus *loadbalancerv1.
 		return nil
 	}
 	ip := lbStatus.Ip
-	if lbStatus.Fip != "" {
+	if lb.isFipEnabled() && lbStatus.Fip != "" {
 		ip = lbStatus.Fip
 	}
 	if ip == "" {

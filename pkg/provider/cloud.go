@@ -95,6 +95,13 @@ type LoadBalancerConfig struct {
 
 	// FipNetworkID is the external network ID for floating IP allocation
 	FipNetworkID string `yaml:"fipNetworkID,omitempty"`
+
+	// IpType controls the type of IP address requested for the load balancer.
+	// Valid values: "external" (default), "internal", "both".
+	//   - "external": FIP is allocated, status uses floating IP.
+	//   - "internal": No FIP, status uses the load balancer's internal IP.
+	//   - "both": FIP is allocated for status, internal IP stored as annotation.
+	IpType string `yaml:"ipType,omitempty"`
 }
 
 type InstancesV2Config struct {

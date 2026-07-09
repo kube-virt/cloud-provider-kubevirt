@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v6.30.0
-// source: loadbalancer.proto
+// source: pkg/rpc/loadbalancer/gen/loadbalancer.proto
 
 package loadbalancerv1
 
@@ -392,5 +392,5 @@ var LoadBalancerService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "loadbalancer.proto",
+	Metadata: "pkg/rpc/loadbalancer/gen/loadbalancer.proto",
 }
