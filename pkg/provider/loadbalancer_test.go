@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/grpc/codes"
@@ -82,12 +84,21 @@ type fakeRPCClient struct {
 	deleteErr    error
 	listResp     *loadbalancerv1.ListLoadBalancersResponse
 	listErr      error
+
+	createReqs []*loadbalancerv1.CreateLoadBalancerRequest
+	// getRespAfterCreate, when set, is returned by GetLoadBalancer once a
+	// create has happened - i.e. the replacement LB the recreate path made.
+	getRespAfterCreate *loadbalancerv1.GetLoadBalancerResponse
 }
 
 func (f *fakeRPCClient) CreateLoadBalancer(ctx context.Context, req *loadbalancerv1.CreateLoadBalancerRequest) (*loadbalancerv1.CreateLoadBalancerResponse, error) {
+	f.createReqs = append(f.createReqs, req)
 	return f.createResp, f.createErr
 }
 func (f *fakeRPCClient) GetLoadBalancer(ctx context.Context, req *loadbalancerv1.GetLoadBalancerRequest) (*loadbalancerv1.GetLoadBalancerResponse, error) {
+	if f.getRespAfterCreate != nil && len(f.createReqs) > 0 {
+		return f.getRespAfterCreate, nil
+	}
 	return f.getResp, f.getErr
 }
 func (f *fakeRPCClient) UpdateLoadBalancer(ctx context.Context, req *loadbalancerv1.UpdateLoadBalancerRequest) (*loadbalancerv1.UpdateLoadBalancerResponse, error) {
@@ -323,6 +334,98 @@ var _ = Describe("LoadBalancer", func() {
 			Expect(status.Ingress[0].IP).To(Equal("203.0.113.1"))
 			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
 			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		It("Should fail fast and report the reason when the load balancer reports FAILED", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-doomed",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:    "lb-doomed",
+						State: loadbalancerv1.State_STATE_FAILED,
+						Error: "no free floating ip in pool",
+					},
+				},
+			}
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+
+			tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+				svc.DeepCopyInto(obj.(*corev1.Service))
+				return nil
+			}).AnyTimes()
+			tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil).AnyTimes()
+
+			start := time.Now()
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			elapsed := time.Since(start)
+
+			Expect(err).To(MatchError(ContainSubstring("no free floating ip in pool")))
+			// Must not burn the whole CreationPollTimeout (5s) waiting on a
+			// state that never changes.
+			Expect(elapsed).To(BeNumerically("<", 3*time.Second))
+		})
+
+		It("Should use a fresh idempotency key when recreating a stuck load balancer", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-recreated",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				// The existing LB never leaves PENDING...
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{Id: "lb-stuck", State: loadbalancerv1.State_STATE_PENDING},
+				},
+				// ...but its replacement comes up healthy.
+				getRespAfterCreate: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-recreated",
+						Ip:       "192.168.0.30",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.9",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+				deleteResp: &loadbalancerv1.DeleteLoadBalancerResponse{Id: "lb-stuck"},
+			}
+			lb.rpcClient = fakeRPC
+			lb.retryCounts = map[string]int{}
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{
+				LoadBalancerIDAnnotationKey:          "lb-stuck",
+				LoadBalancerCreateCountAnnotationKey: "1",
+				// Matching hash, so the retry counter is what advances rather
+				// than the "config changed" branch.
+				LoadBalancerListenerHashAnnotationKey: listenersHashStr(lb.buildListeners(ctx, svc, []*corev1.Node{}, clusterName)),
+			}
+
+			tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+				svc.DeepCopyInto(obj.(*corev1.Service))
+				return nil
+			}).AnyTimes()
+			tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil).AnyTimes()
+
+			// Drive the retry counter up to the recreate threshold: the LB is
+			// stuck in PENDING, so each call increments and errors out.
+			for i := 0; i < maxLoadBalancerRetries; i++ {
+				_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+				Expect(err).To(HaveOccurred())
+			}
+			Expect(fakeRPC.createReqs).To(BeEmpty())
+
+			// Threshold reached: the LB is deleted and recreated.
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(fakeRPC.createReqs).To(HaveLen(1))
+			Expect(fakeRPC.createReqs[0].IdempotencyKey).ToNot(Equal(string(svc.UID)))
+			_, parseErr := uuid.Parse(fakeRPC.createReqs[0].IdempotencyKey)
+			Expect(parseErr).NotTo(HaveOccurred())
 		})
 
 		It("Should update load balancer when annotation exists", func() {
@@ -845,6 +948,36 @@ var _ = Describe("LoadBalancer", func() {
 
 		AfterEach(func() {
 			ctrl.Finish()
+		})
+	})
+
+	Context("With deriving create idempotency keys", func() {
+		svc := newTenantService()
+
+		It("Should reuse the service UID for the first attempt", func() {
+			Expect(createIdempotencyKey(svc, 0)).To(Equal(string(svc.UID)))
+		})
+
+		It("Should be stable for a given attempt", func() {
+			Expect(createIdempotencyKey(svc, 2)).To(Equal(createIdempotencyKey(svc, 2)))
+		})
+
+		It("Should differ between attempts and stay a valid UUID", func() {
+			keys := map[string]bool{}
+			for attempt := 0; attempt <= 3; attempt++ {
+				key := createIdempotencyKey(svc, attempt)
+				_, err := uuid.Parse(key)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(keys).NotTo(HaveKey(key))
+				keys[key] = true
+			}
+		})
+
+		It("Should still produce a UUID when the service UID is not one", func() {
+			odd := newTenantService()
+			odd.UID = types.UID("not-a-uuid")
+			_, err := uuid.Parse(createIdempotencyKey(odd, 1))
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 

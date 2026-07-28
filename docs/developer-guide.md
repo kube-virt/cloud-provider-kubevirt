@@ -35,9 +35,9 @@ gofmt -l pkg cmd                    # some files in this branch are not gofmt-cl
 
 Container image / release targets live in the `Makefile` (upstream, unchanged).
 
-> The repo currently has a 100 MB `kubevirt-cloud-controller-manager` binary
-> committed at the root. It should be removed and added to `.gitignore` before
-> this branch is merged.
+> A build of `kubevirt-cloud-controller-manager` lands at the repo root. It was
+> committed once by accident and has since been removed from git — add it to
+> `.gitignore` so that does not recur.
 
 ## 3. Regenerating the protobuf code
 
@@ -120,8 +120,11 @@ the proto if you want to wire them to config.
 
 ## 7. Gotchas
 
-* **`idempotency_key` must be a UUID.** It is set to `string(service.UID)`, which
-  is fine — but do not substitute a name.
+* **`idempotency_key` must be a UUID**, and must change per create *attempt*.
+  `createIdempotencyKey` handles both: attempt 0 is the Service UID, later
+  attempts are v5 UUIDs derived from it. Do not collapse it back to the bare UID
+  — the recreate path would replay the deleted creation instead of making a new
+  load balancer.
 * **`tenant_id`, `network_id`, `subnet_id` must be UUID-shaped** (the server's
   CEL rule allows the dashless form too). The tenant fallback to
   `service.Namespace` therefore only works when namespaces are named after the
@@ -138,6 +141,9 @@ the proto if you want to wire them to config.
   resets on restart. The recreate counter is an annotation, so it survives.
 * **`EnsureLoadBalancer` blocks** for up to `creationPollTimeout` while polling.
   With `concurrentServiceSyncs: 1` that serialises all LB provisioning.
+* **Every RPC attempt needs a deadline.** `retryOnFailure` wraps each attempt in
+  `Config.Timeout`; keep it that way. Calls pass `grpc.WaitForReady(true)`, so a
+  call made on a bare caller context never returns while the server is down.
 * **Several `ensureServiceAnnotation` calls ignore their error** (create-count,
   listener-hash, internal-ip). Only the `loadbalancer-id` write is treated as
   fatal — which is the right priority, but it means the hash can drift and cause

@@ -15,12 +15,13 @@ import (
 )
 
 type Config struct {
-	ServerAddr  string
-	Timeout     time.Duration
-	RetryMax    int
-	RetryDelay  time.Duration
-	DialOpts    []grpc.DialOption
-	ApiKey      string
+	ServerAddr string
+	// Timeout bounds a single RPC attempt. Each retry gets a fresh Timeout.
+	Timeout    time.Duration
+	RetryMax   int
+	RetryDelay time.Duration
+	DialOpts   []grpc.DialOption
+	ApiKey     string
 }
 
 type apiKeyCreds struct {
@@ -122,16 +123,34 @@ func (c *Client) retryOnFailure(ctx context.Context, operation string, fn func(c
 			}
 		}
 
+		// Every attempt gets its own deadline. Calls are made with
+		// WaitForReady(true), so without one they block for as long as the
+		// caller's context lives - which for the service controller is
+		// effectively forever, stalling reconciliation whenever the server
+		// is unreachable.
+		attemptCtx, cancel := context.WithTimeout(ctx, c.config.Timeout)
+
 		if !c.isConnectionReady() {
-			if err := c.waitForReady(ctx); err != nil {
+			if err := c.waitForReady(attemptCtx); err != nil {
+				cancel()
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				lastErr = fmt.Errorf("connection not ready: %w", err)
 				continue
 			}
 		}
 
-		err := fn(ctx)
+		err := fn(attemptCtx)
+		cancel()
 		if err == nil {
 			return nil
+		}
+
+		// The caller gave up (or its deadline passed); retrying is pointless
+		// and would misreport the reason.
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
 		st, ok := status.FromError(err)

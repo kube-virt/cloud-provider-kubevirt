@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
@@ -143,9 +144,17 @@ func (lb *loadbalancer) pollLoadBalancerReady(ctx context.Context, service *core
 		}
 
 		lbStatus := resp.GetLoadBalancer()
-		if lbStatus != nil && lbStatus.State == loadbalancerv1.State_STATE_READY && lbStatus.Ip != "" {
-			if !lb.isFipEnabled(service) || lbStatus.FipState == loadbalancerv1.FipState_FIP_STATE_ACTIVE {
-				return lbStatus, nil
+		if lbStatus != nil {
+			// A failed load balancer never recovers on its own; waiting out the
+			// remaining timeout only delays the recreate path and hides the
+			// reason the server reported.
+			if lbStatus.State == loadbalancerv1.State_STATE_FAILED {
+				return nil, fmt.Errorf("load balancer %s failed%s", lbID, lbErrorDetail(lbStatus))
+			}
+			if lbStatus.State == loadbalancerv1.State_STATE_READY && lbStatus.Ip != "" {
+				if !lb.isFipEnabled(service) || lbStatus.FipState == loadbalancerv1.FipState_FIP_STATE_ACTIVE {
+					return lbStatus, nil
+				}
 			}
 		}
 
@@ -200,7 +209,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		createReq := &loadbalancerv1.CreateLoadBalancerRequest{
 			Name:           lbName,
 			Spec:           spec,
-			IdempotencyKey: string(service.UID),
+			IdempotencyKey: createIdempotencyKey(service, lb.getCreateCount(service)),
 		}
 
 		if lb.isFipEnabled(service) && lb.config.FipNetworkID != "" {
@@ -310,7 +319,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 				SecurityGroupDisabled: true,
 				QosPolicyDisabled:     true,
 			},
-			IdempotencyKey: string(service.UID),
+			IdempotencyKey: createIdempotencyKey(service, createCount+1),
 		}
 
 		if lb.isFipEnabled(service) && lb.config.FipNetworkID != "" {
@@ -368,7 +377,34 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	lb.retryCounts[string(service.UID)] = retries + 1
 	lb.mu.Unlock()
 
-	return nil, fmt.Errorf("load balancer %s not ready, will retry", lbID)
+	return nil, fmt.Errorf("load balancer %s not ready%s, will retry", lbID, lbErrorDetail(lbStatus))
+}
+
+// lbErrorDetail renders the reason the LB API reported, when it reported one.
+func lbErrorDetail(lbStatus *loadbalancerv1.LoadBalancer) string {
+	if lbStatus == nil {
+		return ""
+	}
+	if lbStatus.Error != "" {
+		return fmt.Sprintf(" (state %s: %s)", lbStatus.State, lbStatus.Error)
+	}
+	return fmt.Sprintf(" (state %s)", lbStatus.State)
+}
+
+// createIdempotencyKey derives the key for one creation attempt. It must be
+// stable across retries of the same attempt, so a lost response replays instead
+// of leaking a second load balancer - and it must differ between attempts, or
+// the server replays the previous (already deleted) creation and the recreate
+// path silently does nothing. The key has to be a UUID per the proto contract.
+func createIdempotencyKey(service *corev1.Service, createAttempt int) string {
+	if createAttempt <= 0 {
+		return string(service.UID)
+	}
+	space, err := uuid.Parse(string(service.UID))
+	if err != nil {
+		space = uuid.Nil
+	}
+	return uuid.NewSHA1(space, []byte(strconv.Itoa(createAttempt))).String()
 }
 
 func (lb *loadbalancer) getCreateCount(service *corev1.Service) int {

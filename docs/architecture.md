@@ -213,7 +213,7 @@ flowchart TD
   E --> F{lb-id annotation?}
   F -->|absent| G[CreateLoadBalancer<br/>idempotency_key = Service UID]
   G --> H[annotate id / count=1 / hash]
-  H --> I[poll until READY + ip<br/>+ FIP ACTIVE if requested]
+  H --> I[poll until READY + ip<br/>+ FIP ACTIVE if requested<br/>abort at once on FAILED]
   I --> J[patch Kamaji advertiseAddress<br/>store internal ip if both]
   J --> K[return status]
   F -->|present| L[GetLoadBalancer]
@@ -266,9 +266,11 @@ One listener per Service port:
   unhealthy threshold 3, healthy threshold 2. The proto enforces
   `timeout < interval`.
 * **Backend refs**: for every node, each `NodeInternalIP` paired with the port's
-  **NodePort**. If no node has an internal IP, `NodeExternalIP` is tried. If the
-  node list is empty altogether (mode 2, where this CCM does not manage nodes),
-  the CCM lists `VirtualMachineInstance`s in its own namespace labelled
+  **NodePort**. The node list comes from the service controller, i.e. the nodes
+  of whichever cluster this CCM watches — tenant worker VMIs in mode 1, infra
+  cluster nodes in mode 2. If no node has an internal IP, `NodeExternalIP` is
+  tried. If the node list is empty altogether, the CCM lists
+  `VirtualMachineInstance`s in its own namespace labelled
   `cluster.x-k8s.io/role=worker` and `cluster.x-k8s.io/cluster-name=<clusterName>`
   and uses the first IP of each interface.
 
@@ -282,11 +284,17 @@ default), `security_group_disabled: true`, `qos_policy_disabled: true`.
 
 `pkg/rpc/loadbalancer/client.go` wraps the generated stub with:
 
+* **Per-attempt deadline** — each attempt runs under `Config.Timeout`
+  (`rpcKeepAlive`, default 30s). Calls use `grpc.WaitForReady(true)`, so without
+  a deadline an unreachable server would block for the lifetime of the caller's
+  context and stall the service controller. If the *caller's* context ends, the
+  loop stops and reports that rather than retrying.
 * **Retry** — up to `rpcRetryMax` extra attempts with exponential backoff
   (`RetryDelay << attempt` plus jitter, capped at 5s). Retried on `UNAVAILABLE`,
   `CANCELED`, `DEADLINE_EXCEEDED` and unknown non-status errors; returned
   immediately on `NOT_FOUND`, `ALREADY_EXISTS`, `INVALID_ARGUMENT`,
-  `PERMISSION_DENIED`.
+  `PERMISSION_DENIED`. Worst-case blocking per RPC is therefore roughly
+  `(rpcRetryMax + 1) x rpcKeepAlive`.
 * **Connection recovery** — before each attempt the connection state is checked
   and `ResetConnectBackoff` + `WaitForStateChange` are used to wait out a server
   restart; calls also use `grpc.WaitForReady(true)`.
@@ -296,6 +304,10 @@ default), `security_group_disabled: true`, `qos_policy_disabled: true`.
 * **Error translation** — `ToRPCError` maps gRPC codes to user-facing messages
   that surface as Service events.
 
-`CreateLoadBalancer` is idempotent server-side via `idempotency_key`, which is
-set to the Service UID; a retried create after a lost response returns the same
-LB rather than leaking one.
+`CreateLoadBalancer` is idempotent server-side via `idempotency_key`. The key is
+derived from the Service UID **and the create attempt number**: the first attempt
+uses the UID verbatim, later attempts use a v5 UUID derived from it. Retrying one
+attempt therefore replays instead of leaking a second load balancer, while the
+recreate path gets a genuinely new key — reusing the UID there would make the
+server replay the previous, already-deleted creation and the recreate would
+silently do nothing.

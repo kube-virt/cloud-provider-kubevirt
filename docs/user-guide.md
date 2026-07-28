@@ -58,7 +58,7 @@ and either a namespaced `Role`/`RoleBinding` (mode 1) or a
 | `resources` | 100m / 128Mi requests | Container resources |
 | `clusterName` | `capi-slowstart` | Passed as `--cluster-name`; also names the kubeconfig Secret (`<clusterName>-kubeconfig`) and is the `cluster.x-k8s.io/cluster-name` value used for the VMI backend fallback |
 | `rpcServerAddr` | `10.2.3.250:9000` | LoadBalancer API gRPC address |
-| `rpcKeepAlive` | `30` | Per-RPC timeout, seconds |
+| `rpcKeepAlive` | `30` | Deadline for a single RPC attempt, seconds. Each retry gets a fresh one, so an unreachable server blocks a sync for at most `(rpcRetryMax + 1) x rpcKeepAlive` |
 | `rpcRetryMax` | `3` | Extra retry attempts per RPC |
 | `apiKey` | `""` | Bearer token for the LoadBalancer API; empty disables auth |
 | `networkID`, `subnetID`, `tenantID` | — | OpenStack IDs used in mode 1 (ignored in mode 2) |
@@ -199,7 +199,8 @@ While provisioning, `EXTERNAL-IP` stays `<pending>`; the CCM blocks inside
 | Event: `Invalid load balancer configuration` | The API rejected the spec. Common causes: `tenant_id`/`network_id`/`subnet_id` not UUID-shaped (a namespace name used as tenant fallback is **not** a UUID); a listener with zero backends (no ready nodes / NodePort not allocated); HTTP listener whose health-check path does not start with `/` |
 | Event: `Load balancer service temporarily unavailable` | The gRPC endpoint is down or unreachable; the client already retried `rpcRetryMax` times |
 | Event: `Permission denied…` | Wrong or missing `apiKey` |
-| `load balancer <id> not ready within 2m0s` | Provisioning slower than `creationPollTimeout`, or the LB went `FAILED`. Raise the timeout, or check the LB API side |
+| `load balancer <id> not ready within 2m0s` | Provisioning slower than `creationPollTimeout`. Raise the timeout, or check the LB API side |
+| `load balancer <id> failed (state STATE_FAILED: …)` | The LB API gave up; the text after the colon is its own `error` field. The CCM stops waiting immediately and retries, recreating the LB after 10 unsuccessful syncs |
 | `load balancer <id> failed to provision after 3 create attempts` | Hard stop. Fix the underlying problem, then delete the `kubevirt.io/loadbalancer-create-count` and `kubevirt.io/loadbalancer-id` annotations to start over — and delete the orphaned LB via the API |
 | Kamaji `advertiseAddress` never updated | The Service lacks the `kamaji.clastix.io/name` label, `onlyServiceController` is false, or the ClusterRole lacks `kamajicontrolplanes` patch rights |
 | Traffic to an internal VIP lands on the wrong cluster | Confirm the status shows `ipMode: Proxy`; with `VIP` kube-proxy short-circuits the address locally |
