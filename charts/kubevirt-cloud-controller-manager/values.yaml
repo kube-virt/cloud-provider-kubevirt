@@ -12,7 +12,7 @@ resources:
 cloudConfig:
   loadBalancer:
     creationPollInterval: 5
-    creationPollTimeout: 60
+    creationPollTimeout: 120
   instancesV2:
     enabled: true
     zoneAndRegionEnabled: false
@@ -20,11 +20,11 @@ cloudConfig:
 rpcServerAddr: "10.2.3.250:9000"
 rpcKeepAlive: 30
 rpcRetryMax: 3
-networkID: "6fdf82fd-659c-435b-9452-2677689229b5"
-subnetID: "a6b34727-fd97-4085-ba63-7784195218a4"
-fipNetworkID: "013234de-62ee-48ce-9c2b-cb0849b335a4"
+networkID: "e31344bd-5840-4e67-b9f4-42f2d022655c"
+subnetID: "34ae98d5-c02d-48f7-a525-19dc6ea10032"
+fipNetworkID: "46a8ddf9-a531-4c81-9451-d221f59b19ea"
 ipType: "external" # internal, external, both
-tenantID: "b4e90e6f0982470ba5472483e82c7db8"
+tenantID: "8743f99e2933433e8cc1b760de8d63f0"
 
 serviceAccount:
   create: true
@@ -43,7 +43,13 @@ role:
     - update
   nonResourceURLs: []
 
-clusterName: "ccm"
+clusterName: "capi-slowstart"
 
 # when true, disables node and route controllers, keeping only loadbalancer (service) + EPS controllers
 onlyServiceController: false
+
+# number of services to sync concurrently (default 1, set >1 for parallel LB creation)
+concurrentServiceSyncs: 1
+
+# API key for authenticating with the RPC server, empty = no auth
+apiKey: ""

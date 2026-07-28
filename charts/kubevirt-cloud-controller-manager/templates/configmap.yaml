@@ -18,6 +18,8 @@ data:
       tenantID: {{ .Values.tenantID }}
       fipNetworkID: {{ .Values.fipNetworkID }}
       ipType: {{ .Values.ipType }}
+      onlyServiceController: {{ .Values.onlyServiceController }}
+      apiKey: {{ .Values.apiKey }}
     namespace: {{ .Release.Namespace }}
     instancesV2:
       enabled: {{ .Values.cloudConfig.instancesV2.enabled }}

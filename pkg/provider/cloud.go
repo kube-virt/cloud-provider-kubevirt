@@ -102,6 +102,14 @@ type LoadBalancerConfig struct {
 	//   - "internal": No FIP, status uses the load balancer's internal IP.
 	//   - "both": FIP is allocated for status, internal IP stored as annotation.
 	IpType string `yaml:"ipType,omitempty"`
+
+	// OnlyServiceController when true disables node/route controllers and reads
+	// network/subnet/tenant config from service annotations instead of global config.
+	OnlyServiceController bool `yaml:"onlyServiceController,omitempty"`
+
+	// ApiKey is the API key for authenticating with the RPC server.
+	// When empty, authentication is disabled.
+	ApiKey string `yaml:"apiKey,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -219,6 +227,7 @@ func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 			Timeout:    30 * time.Second,
 			RetryMax:   3,
 			RetryDelay: 100 * time.Millisecond,
+			ApiKey:     c.config.LoadBalancer.ApiKey,
 			DialOpts: []grpc.DialOption{
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 			},

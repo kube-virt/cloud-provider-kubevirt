@@ -28,7 +28,10 @@ spec:
         - --cluster-name={{ .Values.clusterName }}
         {{- end }}
         {{- if .Values.onlyServiceController }}
-        - --controllers=*,-cloud-node,-cloud-node-lifecycle,-route
+        - --controllers=*,-cloud-node-controller,-cloud-node-lifecycle-controller,-node-route-controller
+        {{- end }}
+        {{- if gt (.Values.concurrentServiceSyncs | int) 1 }}
+        - --concurrent-service-syncs={{ .Values.concurrentServiceSyncs }}
         {{- end }}
         command:
         - /bin/kubevirt-cloud-controller-manager

@@ -20,6 +20,21 @@ type Config struct {
 	RetryMax    int
 	RetryDelay  time.Duration
 	DialOpts    []grpc.DialOption
+	ApiKey      string
+}
+
+type apiKeyCreds struct {
+	apiKey string
+}
+
+func (c apiKeyCreds) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{
+		"authorization": "Bearer " + c.apiKey,
+	}, nil
+}
+
+func (c apiKeyCreds) RequireTransportSecurity() bool {
+	return false
 }
 
 type Client struct {
@@ -43,6 +58,10 @@ func NewClient(ctx context.Context, config *Config) (*Client, error) {
 		config.DialOpts = []grpc.DialOption{
 			grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 		}
+	}
+
+	if config.ApiKey != "" {
+		config.DialOpts = append(config.DialOpts, grpc.WithPerRPCCredentials(apiKeyCreds{apiKey: config.ApiKey}))
 	}
 
 	conn, err := grpc.DialContext(ctx, config.ServerAddr, config.DialOpts...)
