@@ -1,0 +1,55 @@
+image:
+  repository: ghcr.io/kube-virt/cloud-provider-kubevirt
+  tag: v0.1.0-ac
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits: {}
+
+cloudConfig:
+  loadBalancer:
+    creationPollInterval: 5
+    creationPollTimeout: 120
+  instancesV2:
+    enabled: true
+    zoneAndRegionEnabled: false
+
+rpcServerAddr: ""
+rpcKeepAlive: 30
+rpcRetryMax: 3
+networkID: ""
+subnetID: ""
+fipNetworkID: ""
+ipType: "external" # internal, external, both
+tenantID: ""
+
+serviceAccount:
+  create: true
+  name: cloud-controller-manager
+
+role:
+  apiGroups:
+    - kubevirt.io
+  resources:
+    - virtualmachines
+    - virtualmachineinstances
+  verbs:
+    - get
+    - watch
+    - list
+    - update
+  nonResourceURLs: []
+
+clusterName: ""
+
+# when true, disables node and route controllers, keeping only loadbalancer (service) + EPS controllers
+onlyServiceController: false
+
+# number of services to sync concurrently (default 1, set >1 for parallel LB creation)
+concurrentServiceSyncs: 1
+
+# API key for authenticating with the RPC server, empty = no auth
+apiKey: ""

@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubevirt-cloud-controller-manager.labels" . | nindent 4 }}
+data:
+  cloud-config: |
+    loadBalancer:
+      creationPollInterval: {{ .Values.cloudConfig.loadBalancer.creationPollInterval }}
+      creationPollTimeout: {{ .Values.cloudConfig.loadBalancer.creationPollTimeout }}
+      rpcServerAddr: {{ .Values.rpcServerAddr }}
+      rpcKeepAlive: {{ .Values.rpcKeepAlive }}
+      rpcRetryMax: {{ .Values.rpcRetryMax }}
+      networkID: {{ .Values.networkID }}
+      subnetID: {{ .Values.subnetID }}
+      tenantID: {{ .Values.tenantID }}
+      fipNetworkID: {{ .Values.fipNetworkID }}
+      ipType: {{ .Values.ipType }}
+      onlyServiceController: {{ .Values.onlyServiceController }}
+      apiKey: {{ .Values.apiKey }}
+    namespace: {{ .Release.Namespace }}
+    instancesV2:
+      enabled: {{ .Values.cloudConfig.instancesV2.enabled }}
+      zoneAndRegionEnabled: {{ .Values.cloudConfig.instancesV2.zoneAndRegionEnabled }}
+

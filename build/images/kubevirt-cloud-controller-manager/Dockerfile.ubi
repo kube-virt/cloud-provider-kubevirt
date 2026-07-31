@@ -10,7 +10,9 @@ WORKDIR /build
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=vendor -a -o /bin/kubevirt-cloud-controller-manager ./cmd/kubevirt-cloud-controller-manager
 
-FROM alpine as runtime
+FROM registry.access.redhat.com/ubi9/ubi-minimal as runtime
+RUN mkdir -p /licenses
+COPY LICENSE /licenses/
 COPY --from=build /bin/kubevirt-cloud-controller-manager /bin/kubevirt-cloud-controller-manager
 
 USER 65534

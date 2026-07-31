@@ -2,11 +2,15 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -16,6 +20,8 @@ import (
 	"k8s.io/utils/pointer"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	rpc "kubevirt.io/cloud-provider-kubevirt/pkg/rpc/loadbalancer"
 )
 
 const (
@@ -36,9 +42,10 @@ func init() {
 }
 
 type Cloud struct {
-	namespace string
-	client    client.Client
-	config    CloudConfig
+	namespace    string
+	client       client.Client
+	tenantClient client.Client
+	config       CloudConfig
 }
 
 type CloudConfig struct {
@@ -67,6 +74,42 @@ type LoadBalancerConfig struct {
 	// This is a temporary flag to enable/disable the EPS controller
 	// When disabled the service selector is used.
 	EnableEPSController *bool `yaml:"enableEPSController,omitempty"`
+
+	// RPCServerAddr is the address of the RPC server for load balancer management
+	RPCServerAddr string `yaml:"rpcServerAddr,omitempty"`
+
+	// RPCKeepAlive is the keep-alive period in seconds for RPC connections
+	RPCKeepAlive *int `yaml:"rpcKeepAlive,omitempty"`
+
+	// RPCRetryMax is the maximum number of retry attempts for RPC calls
+	RPCRetryMax *int `yaml:"rpcRetryMax,omitempty"`
+
+	// NetworkID is the network ID used for load balancer
+	NetworkID string `yaml:"networkID,omitempty"`
+
+	// SubnetID is the subnet ID used for load balancer
+	SubnetID string `yaml:"subnetID,omitempty"`
+
+	// TenantID is the OpenStack tenant ID for load balancer
+	TenantID string `yaml:"tenantID,omitempty"`
+
+	// FipNetworkID is the external network ID for floating IP allocation
+	FipNetworkID string `yaml:"fipNetworkID,omitempty"`
+
+	// IpType controls the type of IP address requested for the load balancer.
+	// Valid values: "external" (default), "internal", "both".
+	//   - "external": FIP is allocated, status uses floating IP.
+	//   - "internal": No FIP, status uses the load balancer's internal IP.
+	//   - "both": FIP is allocated for status, internal IP stored as annotation.
+	IpType string `yaml:"ipType,omitempty"`
+
+	// OnlyServiceController when true disables node/route controllers and reads
+	// network/subnet/tenant config from service annotations instead of global config.
+	OnlyServiceController bool `yaml:"onlyServiceController,omitempty"`
+
+	// ApiKey is the API key for authenticating with the RPC server.
+	// When empty, authentication is disabled.
+	ApiKey string `yaml:"apiKey,omitempty"`
 }
 
 type InstancesV2Config struct {
@@ -82,8 +125,8 @@ func createDefaultCloudConfig() CloudConfig {
 	return CloudConfig{
 		LoadBalancer: LoadBalancerConfig{
 			Enabled:              true,
-			CreationPollInterval: pointer.Int(int(defaultLoadBalancerCreatePollInterval.Seconds())),
-			CreationPollTimeout:  pointer.Int(int(defaultLoadBalancerCreatePollTimeout.Seconds())),
+			CreationPollInterval: pointer.Int(DefaultLoadBalancerCreatePollInterval),
+			CreationPollTimeout:  pointer.Int(DefaultLoadBalancerCreatePollTimeout),
 		},
 		InstancesV2: InstancesV2Config{
 			Enabled:              true,
@@ -161,6 +204,14 @@ func kubevirtCloudProviderFactory(config io.Reader) (cloudprovider.Interface, er
 // Initialize provides the Cloud with a kubernetes client builder and may spawn goroutines
 // to perform housekeeping activities within the Cloud provider.
 func (c *Cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
+	tenantConfig := clientBuilder.ConfigOrDie("")
+	tenantClient, err := client.New(tenantConfig, client.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		klog.Fatalf("Failed to create tenant client: %v", err)
+	}
+	c.tenantClient = tenantClient
 }
 
 // LoadBalancer returns a balancer interface. Also returns true if the interface is supported, false otherwise.
@@ -168,11 +219,44 @@ func (c *Cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 	if !c.config.LoadBalancer.Enabled {
 		return nil, false
 	}
+
+	var rpcClient *rpc.Client
+	if c.config.LoadBalancer.RPCServerAddr != "" {
+		rpcConfig := &rpc.Config{
+			ServerAddr: c.config.LoadBalancer.RPCServerAddr,
+			Timeout:    30 * time.Second,
+			RetryMax:   3,
+			RetryDelay: 100 * time.Millisecond,
+			ApiKey:     c.config.LoadBalancer.ApiKey,
+			DialOpts: []grpc.DialOption{
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+			},
+		}
+		if c.config.LoadBalancer.RPCKeepAlive != nil {
+			rpcConfig.Timeout = time.Duration(*c.config.LoadBalancer.RPCKeepAlive) * time.Second
+		}
+		if c.config.LoadBalancer.RPCRetryMax != nil {
+			rpcConfig.RetryMax = *c.config.LoadBalancer.RPCRetryMax
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		client, err := rpc.NewClient(ctx, rpcConfig)
+		if err != nil {
+			klog.Errorf("Failed to create RPC client: %v", err)
+		} else {
+			rpcClient = client
+		}
+	}
+
 	return &loadbalancer{
-		namespace:   c.namespace,
-		client:      c.client,
-		config:      c.config.LoadBalancer,
-		infraLabels: c.config.InfraLabels,
+		namespace:    c.namespace,
+		client:       c.client,
+		tenantClient: c.tenantClient,
+		config:       c.config.LoadBalancer,
+		rpcClient:    rpcClient,
+		retryCounts:  make(map[string]int),
 	}, true
 }
 

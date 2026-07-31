@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubevirt-cloud-controller-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubevirt-cloud-controller-manager.labels" . | nindent 4 }}
+    k8s-app: kubevirt-cloud-controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kubevirt-cloud-controller-manager.selectorLabels" . | nindent 6 }}
+      k8s-app: kubevirt-cloud-controller-manager
+  template:
+    metadata:
+      labels:
+        {{- include "kubevirt-cloud-controller-manager.labels" . | nindent 8 }}
+        k8s-app: kubevirt-cloud-controller-manager
+    spec:
+      containers:
+      - args:
+        - --cloud-provider=kubevirt
+        - --cloud-config=/etc/cloud/cloud-config
+        - --kubeconfig=/etc/kubernetes/kubeconfig/value
+        - --authentication-skip-lookup=true
+        {{- if .Values.clusterName }}
+        - --cluster-name={{ .Values.clusterName }}
+        {{- end }}
+        {{- if .Values.onlyServiceController }}
+        - --controllers=*,-cloud-node-controller,-cloud-node-lifecycle-controller,-node-route-controller
+        {{- end }}
+        {{- if gt (.Values.concurrentServiceSyncs | int) 1 }}
+        - --concurrent-service-syncs={{ .Values.concurrentServiceSyncs }}
+        {{- end }}
+        command:
+        - /bin/kubevirt-cloud-controller-manager
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: kubevirt-cloud-controller-manager
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /etc/kubernetes/kubeconfig
+          name: kubeconfig
+          readOnly: true
+        - mountPath: /etc/cloud
+          name: cloud-config
+          readOnly: true
+      serviceAccountName: {{ include "kubevirt-cloud-controller-manager.serviceAccountName" . }}
+      tolerations:
+      - effect: NoSchedule
+        key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+      volumes:
+      - configMap:
+          name: cloud-config
+        name: cloud-config
+      - name: kubeconfig
+        secret:
+          secretName: {{ .Values.clusterName }}-kubeconfig
