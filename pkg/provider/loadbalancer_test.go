@@ -3,77 +3,28 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
-
-	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/provider/mock/client"
+	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	mockclient "kubevirt.io/cloud-provider-kubevirt/pkg/provider/mock/client"
+	loadbalancerv1 "kubevirt.io/cloud-provider-kubevirt/pkg/rpc/loadbalancer/gen"
 )
 
 const (
 	lbServiceName      string = "af6ebf1722bb111e9b210d663bd873d9"
 	lbServiceNamespace string = "test"
 	clusterName        string = "kvcluster"
-)
-
-var (
-	svcEmptyStatus = corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a6fa1a2662ad011e9b210d663bd873d9",
-			Namespace: "test",
-		},
-		Spec: corev1.ServiceSpec{
-			Ports: []corev1.ServicePort{
-				{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(30005)},
-			},
-		},
-	}
-	svcHostnameIngress = corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a6fa1a6582ad011e9b210d663bd873d9",
-			Namespace: "test",
-		},
-		Status: corev1.ServiceStatus{
-			LoadBalancer: corev1.LoadBalancerStatus{
-				Ingress: []corev1.LoadBalancerIngress{
-					{IP: "192.168.0.36", Hostname: "lb1.example.com"},
-					{Hostname: "lb2.example.com"},
-				},
-			},
-		},
-	}
-	svc4 = corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "a6fa1a50e2ad011e9b210d663bd873d9",
-			Namespace: "test",
-		},
-		Spec: corev1.ServiceSpec{
-			Ports: []corev1.ServicePort{
-				{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromInt(30005)},
-			},
-			Selector: map[string]string{
-				"cloud.kubevirt.io/a6fa1a50e2ad011e9b210d663bd873d9": "service4",
-			},
-		},
-		Status: corev1.ServiceStatus{
-			LoadBalancer: corev1.LoadBalancerStatus{
-				Ingress: []corev1.LoadBalancerIngress{
-					{IP: "192.168.0.35"},
-				},
-			},
-		},
-	}
-	notFoundErr = apierrors.NewNotFound(schema.GroupResource{Group: "v1", Resource: "services"}, lbServiceName)
 )
 
 func makeLoadBalancerStatus(ips, hostnames []string) *corev1.LoadBalancerStatus {
@@ -90,7 +41,6 @@ func makeLoadBalancerStatus(ips, hostnames []string) *corev1.LoadBalancerStatus 
 		return status
 	}
 	ingressList := make([]corev1.LoadBalancerIngress, length)
-
 	for i := 0; i < length; i++ {
 		var ip, hostname string
 		if i < lenIps {
@@ -112,53 +62,105 @@ func cmpLoadBalancerStatuses(a, b *corev1.LoadBalancerStatus) bool {
 	if a == b {
 		return true
 	}
-
 	if (a == nil || b == nil) || (len(a.Ingress) != len(b.Ingress)) {
 		return false
 	}
-
 	for i, aIngress := range a.Ingress {
 		if (aIngress.IP != b.Ingress[i].IP) || (aIngress.Hostname != b.Ingress[i].Hostname) {
 			return false
 		}
 	}
-
 	return true
 }
 
-func generateInfraService(tenantSvc *corev1.Service, ports []corev1.ServicePort) *corev1.Service {
-	svc := &corev1.Service{
+type fakeRPCClient struct {
+	createResp   *loadbalancerv1.CreateLoadBalancerResponse
+	createErr    error
+	getResp      *loadbalancerv1.GetLoadBalancerResponse
+	getErr       error
+	updateResp   *loadbalancerv1.UpdateLoadBalancerResponse
+	updateErr    error
+	deleteResp   *loadbalancerv1.DeleteLoadBalancerResponse
+	deleteErr    error
+	listResp     *loadbalancerv1.ListLoadBalancersResponse
+	listErr      error
+
+	createReqs []*loadbalancerv1.CreateLoadBalancerRequest
+	// getRespAfterCreate, when set, is returned by GetLoadBalancer once a
+	// create has happened - i.e. the replacement LB the recreate path made.
+	getRespAfterCreate *loadbalancerv1.GetLoadBalancerResponse
+}
+
+func (f *fakeRPCClient) CreateLoadBalancer(ctx context.Context, req *loadbalancerv1.CreateLoadBalancerRequest) (*loadbalancerv1.CreateLoadBalancerResponse, error) {
+	f.createReqs = append(f.createReqs, req)
+	return f.createResp, f.createErr
+}
+func (f *fakeRPCClient) GetLoadBalancer(ctx context.Context, req *loadbalancerv1.GetLoadBalancerRequest) (*loadbalancerv1.GetLoadBalancerResponse, error) {
+	if f.getRespAfterCreate != nil && len(f.createReqs) > 0 {
+		return f.getRespAfterCreate, nil
+	}
+	return f.getResp, f.getErr
+}
+func (f *fakeRPCClient) UpdateLoadBalancer(ctx context.Context, req *loadbalancerv1.UpdateLoadBalancerRequest) (*loadbalancerv1.UpdateLoadBalancerResponse, error) {
+	return f.updateResp, f.updateErr
+}
+func (f *fakeRPCClient) DeleteLoadBalancer(ctx context.Context, req *loadbalancerv1.DeleteLoadBalancerRequest) (*loadbalancerv1.DeleteLoadBalancerResponse, error) {
+	return f.deleteResp, f.deleteErr
+}
+func (f *fakeRPCClient) ListLoadBalancers(ctx context.Context, req *loadbalancerv1.ListLoadBalancersRequest) (*loadbalancerv1.ListLoadBalancersResponse, error) {
+	return f.listResp, f.listErr
+}
+
+func newTestLoadBalancer(ctrl *gomock.Controller, rpc rpcLBClient) *loadbalancer {
+	c := mockclient.NewMockClient(ctrl)
+	tenantC := mockclient.NewMockClient(ctrl)
+	return &loadbalancer{
+		namespace:    "test",
+		client:       c,
+		tenantClient: tenantC,
+		config: LoadBalancerConfig{
+			CreationPollInterval: pointer.Int(1),
+			CreationPollTimeout:  pointer.Int(5),
+		},
+		rpcClient: rpc,
+	}
+}
+
+func newTestLoadBalancerWithTenantClient(ctrl *gomock.Controller, tenantC client.Client, rpc rpcLBClient) *loadbalancer {
+	c := mockclient.NewMockClient(ctrl)
+	return &loadbalancer{
+		namespace:    "test",
+		client:       c,
+		tenantClient: tenantC,
+		config: LoadBalancerConfig{
+			CreationPollInterval: pointer.Int(1),
+			CreationPollTimeout:  pointer.Int(5),
+		},
+		rpcClient: rpc,
+	}
+}
+
+func newTenantService() *corev1.Service {
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      lbServiceName,
-			Namespace: lbServiceNamespace,
-			Labels: map[string]string{
-				"cluster.x-k8s.io/tenant-service-name":      tenantSvc.Name,
-				"cluster.x-k8s.io/tenant-service-namespace": tenantSvc.Namespace,
-				"cluster.x-k8s.io/cluster-name":             clusterName,
-			},
-			Annotations: tenantSvc.Annotations,
+			Name:      "service1",
+			Namespace: "test",
+			UID:       types.UID("f6ebf172-2bb1-11e9-b210-d663bd873d93"),
 		},
 		Spec: corev1.ServiceSpec{
-			Type:                  corev1.ServiceTypeLoadBalancer,
-			Ports:                 ports,
-			ExternalTrafficPolicy: tenantSvc.Spec.ExternalTrafficPolicy,
+			Type: corev1.ServiceTypeLoadBalancer,
+			Ports: []corev1.ServicePort{
+				{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30001},
+			},
+			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
 		},
 	}
-	if tenantSvc.Spec.ExternalTrafficPolicy != corev1.ServiceExternalTrafficPolicyLocal {
-		svc.Spec.Selector = map[string]string{
-			TenantNodeRoleLabelKey:    "worker",
-			TenantClusterNameLabelKey: clusterName,
-		}
-	}
-	return svc
 }
 
 var _ = Describe("LoadBalancer", func() {
 
 	Context("With getting loadbalancer status", Ordered, func() {
-
 		var (
-			c    *mockclient.MockClient
 			ctrl *gomock.Controller
 			ctx  context.Context
 			lb   *loadbalancer
@@ -166,1071 +168,817 @@ var _ = Describe("LoadBalancer", func() {
 
 		BeforeAll(func() {
 			ctrl, ctx = gomock.WithContext(context.Background(), GinkgoT())
-			c = mockclient.NewMockClient(ctrl)
-			lb = &loadbalancer{
-				namespace: "test",
-				client:    c,
-			}
-			gomock.InOrder(
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "a6fa1a2662ad011e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svcEmptyStatus),
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "a6fa1a50e2ad011e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svc4),
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "a6fa1a6582ad011e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).SetArg(2, svcHostnameIngress),
-				c.EXPECT().Get(ctx, client.ObjectKey{Name: "adoesnotexistink8s", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).Return(apierrors.NewNotFound(schema.GroupResource{Group: "v1", Resource: "services"}, "adoesnotexistink8s")),
-			)
+			lb = newTestLoadBalancer(ctrl, nil)
 		})
 
-		DescribeTable("Get loadbalancer", func(serviceUID types.UID, clusterName string, expectedLBStatus *corev1.LoadBalancerStatus, expectedExists bool, expectedError error) {
-			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{UID: serviceUID}}
+		It("Should return error when RPC client is nil", func() {
+			svc := newTenantService()
 			status, exists, err := lb.GetLoadBalancer(ctx, clusterName, svc)
-			Expect(cmpLoadBalancerStatuses(status, expectedLBStatus)).Should(BeTrue())
-			Expect(exists).Should(Equal(expectedExists))
-			if expectedError != nil {
-				Expect(err).Should(Equal(expectedError))
-			} else {
-				Expect(err).NotTo(HaveOccurred())
-			}
+			Expect(err).To(MatchError(ContainSubstring("RPC client is not configured")))
+			Expect(exists).To(BeFalse())
+			Expect(status).To(BeNil())
+		})
 
-		},
-			Entry("Should return status with no IPs & hostnames", types.UID("6fa1a266-2ad0-11e9-b210-d663bd873d93"), "", makeLoadBalancerStatus([]string{}, []string{}), true, nil),
-			Entry("Should return status with IPs & no hostnames", types.UID("6fa1a50e-2ad0-11e9-b210-d663bd873d93"), "cluster1", makeLoadBalancerStatus([]string{"192.168.0.35"}, []string{}), true, nil),
-			Entry("Should return status with IPs & hostnames", types.UID("6fa1a658-2ad0-11e9-b210-d663bd873d93"), "cluster2", makeLoadBalancerStatus([]string{"192.168.0.36"}, []string{"lb1.example.com", "lb2.example.com"}), true, nil),
-			Entry("Should return with not-exist-status", types.UID("does-not-exist-in-k8s"), "cluster2", nil, false, nil),
-		)
+		It("Should return not exists when no annotation is present", func() {
+			fakeRPC := &fakeRPCClient{}
+			lb.rpcClient = fakeRPC
+			svc := newTenantService()
+			status, exists, err := lb.GetLoadBalancer(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exists).To(BeFalse())
+			Expect(status).To(BeNil())
+		})
+
+		It("Should return status when annotation is present", func() {
+			fakeRPC := &fakeRPCClient{
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:    "lb-1",
+						Ip:    "10.0.0.1",
+						State: loadbalancerv1.State_STATE_READY,
+					},
+				},
+			}
+			lb.rpcClient = fakeRPC
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-1"}
+
+			status, exists, err := lb.GetLoadBalancer(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exists).To(BeTrue())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("10.0.0.1"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		It("Should return FIP when active", func() {
+			fakeRPC := &fakeRPCClient{
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-2",
+						Ip:       "10.0.0.2",
+						Fip:      "203.0.113.1",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+						State:    loadbalancerv1.State_STATE_READY,
+					},
+				},
+			}
+			lb.rpcClient = fakeRPC
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-2"}
+
+			status, exists, err := lb.GetLoadBalancer(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exists).To(BeTrue())
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.1"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
 
 		AfterAll(func() {
 			ctrl.Finish()
 		})
-	})
-
-	Context("With getting loadbalancer name", Ordered, func() {
-
-		var (
-			c    *mockclient.MockClient
-			ctrl *gomock.Controller
-			ctx  context.Context
-			lb   *loadbalancer
-		)
-
-		BeforeAll(func() {
-			ctrl, ctx = gomock.WithContext(context.Background(), GinkgoT())
-			c = mockclient.NewMockClient(ctrl)
-			lb = &loadbalancer{
-				namespace: "test",
-				client:    c,
-			}
-		})
-
-		DescribeTable("Get loadbalancer name", func(serviceUID types.UID, clusterName string, expectedName string) {
-			svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{UID: serviceUID}}
-			name := lb.GetLoadBalancerName(ctx, clusterName, svc)
-			Expect(name).Should(Equal(expectedName))
-		},
-			Entry(fmt.Sprintf("Should return loadbalancer with %s name ", "a6fa1a2662ad011e9b210d663bd873d9"), types.UID("6fa1a266-2ad0-11e9-b210-d663bd873d93"), "", "a6fa1a2662ad011e9b210d663bd873d9"),
-			Entry(fmt.Sprintf("Should return loadbalancer with %s name ", "a6fa1a50e2ad011e9b210d663bd873d9"), types.UID("6fa1a50e-2ad0-11e9-b210-d663bd873d93"), "cluster1", "a6fa1a50e2ad011e9b210d663bd873d9"),
-			Entry(fmt.Sprintf("Should return loadbalancer with %s name ", "a6fa1a6582ad011e9b210d663bd873d9"), types.UID("6fa1a658-2ad0-11e9-b210-d663bd873d93"), "cluster2", "a6fa1a6582ad011e9b210d663bd873d9"),
-		)
-
-		AfterAll(func() {
-			ctrl.Finish()
-		})
-
 	})
 
 	Context("With ensuring loadbalancer", Ordered, func() {
-
 		var (
-			c              *mockclient.MockClient
-			ctrl           *gomock.Controller
-			ctx            context.Context
-			lb             *loadbalancer
-			tenantService  *corev1.Service
-			nodes          []*corev1.Node
-			loadBalancerIP string
+			ctrl    *gomock.Controller
+			ctx     context.Context
+			lb      *loadbalancer
+			tenantC *mockclient.MockClient
 		)
 
 		BeforeEach(func() {
 			ctrl, ctx = gomock.WithContext(context.Background(), GinkgoT())
-			c = mockclient.NewMockClient(ctrl)
+			tenantC = mockclient.NewMockClient(ctrl)
+			c := mockclient.NewMockClient(ctrl)
 			lb = &loadbalancer{
-				namespace: "test",
-				client:    c,
+				namespace:    "test",
+				client:       c,
+				tenantClient: tenantC,
 				config: LoadBalancerConfig{
 					CreationPollInterval: pointer.Int(1),
 					CreationPollTimeout:  pointer.Int(5),
+					FipNetworkID:        "fip-net",
 				},
+				rpcClient: nil,
 			}
-
-			tenantService = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "service1",
-					UID:  types.UID("f6ebf172-2bb1-11e9-b210-d663bd873d93"),
-					Annotations: map[string]string{
-						"annotation-key-1": "annotation-val-1",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Type: corev1.ServiceTypeLoadBalancer,
-					Ports: []corev1.ServicePort{
-						{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30001},
-					},
-					ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
-				},
-			}
-			nodes = []*corev1.Node{}
-			loadBalancerIP = "123.456.7.8"
-
+			c.EXPECT().List(ctx, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 		})
 
-		It("Should create a loadbalancer without selectors when ExternalTrafficPolicy is local and eps controller is enabled", func() {
-			checkSvcExistErr := notFoundErr
-			getCount := 3
-
-			tenantService.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyTypeLocal
-			lb.config.EnableEPSController = pointer.Bool(true)
-			lb.config.Selectorless = pointer.Bool(true)
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(checkSvcExistErr)
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-			infraService1.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyTypeLocal
-
-			c.EXPECT().Create(ctx, infraService1)
-
-			for i := 0; i < getCount; i++ {
-				infraService2 := infraService1.DeepCopy()
-				if i == getCount-1 {
-					infraService2.Status = corev1.ServiceStatus{
-						LoadBalancer: corev1.LoadBalancerStatus{
-							Ingress: []corev1.LoadBalancerIngress{
-								{
-									IP: loadBalancerIP,
-								},
-							},
-						},
-					}
-				}
-				c.EXPECT().Get(
-					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-					infraService2.DeepCopyInto(obj.(*corev1.Service))
-				})
-			}
-
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).To(BeNil())
-			Expect(len(lbStatus.Ingress)).Should(Equal(1))
-			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
+		It("Should return error if RPC client is not configured", func() {
+			svc := newTenantService()
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).To(MatchError(ContainSubstring("RPC client is not configured")))
 		})
 
-		It("Should create new Service and poll LoadBalancer service 1 time", func() {
-			checkSvcExistErr := notFoundErr
-			getCount := 1
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
+		It("Should create load balancer and annotate service", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-new",
+					State: loadbalancerv1.State_STATE_PENDING,
 				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-new",
+						Ip:       "192.168.0.10",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.1",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
 					},
 				},
 			}
+			lb.rpcClient = fakeRPC
 
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(checkSvcExistErr)
+			svc := newTenantService()
 
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
+			gomock.InOrder(
+				// ensureServiceAnnotation for LB ID: Get + Update
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-new"))
+					return nil
+				}),
+				// ensureServiceAnnotation for create count: Get + Update
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerCreateCountAnnotationKey, "1"))
+					return nil
+				}),
+				// ensureServiceAnnotation for listener hash: Get + Update
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKey(LoadBalancerListenerHashAnnotationKey))
+					return nil
+				}),
 			)
 
-			c.EXPECT().Create(ctx, infraService1)
-
-			for i := 0; i < getCount; i++ {
-				infraService2 := infraService1.DeepCopy()
-				if i == getCount-1 {
-					infraService2.Status = corev1.ServiceStatus{
-						LoadBalancer: corev1.LoadBalancerStatus{
-							Ingress: []corev1.LoadBalancerIngress{
-								{
-									IP: loadBalancerIP,
-								},
-							},
-						},
-					}
-				}
-				c.EXPECT().Get(
-					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-					infraService2.DeepCopyInto(obj.(*corev1.Service))
-				})
-			}
-
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).To(BeNil())
-			Expect(len(lbStatus.Ingress)).Should(Equal(1))
-			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
-
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.1"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
 		})
 
-		It("Should create new Service and poll LoadBalancer service 3 times", func() {
-			checkSvcExistErr := notFoundErr
-			getCount := 3
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
+		It("Should fail fast and report the reason when the load balancer reports FAILED", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-doomed",
+					State: loadbalancerv1.State_STATE_PENDING,
 				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:    "lb-doomed",
+						State: loadbalancerv1.State_STATE_FAILED,
+						Error: "no free floating ip in pool",
 					},
 				},
 			}
+			lb.rpcClient = fakeRPC
 
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(checkSvcExistErr)
+			svc := newTenantService()
 
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			c.EXPECT().Create(ctx, infraService1)
-
-			for i := 0; i < getCount; i++ {
-				infraService2 := infraService1.DeepCopy()
-				if i == getCount-1 {
-					infraService2.Status = corev1.ServiceStatus{
-						LoadBalancer: corev1.LoadBalancerStatus{
-							Ingress: []corev1.LoadBalancerIngress{
-								{
-									IP: loadBalancerIP,
-								},
-							},
-						},
-					}
-				}
-				c.EXPECT().Get(
-					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-					infraService2.DeepCopyInto(obj.(*corev1.Service))
-				})
-			}
-
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).To(BeNil())
-			Expect(len(lbStatus.Ingress)).Should(Equal(1))
-			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
-
-		})
-
-		It("Should create new Service without selector if selectorless flag is true", func() {
-			checkSvcExistErr := notFoundErr
-			getCount := 1
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(checkSvcExistErr)
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-			infraService1.Spec.Selector = nil
-
-			c.EXPECT().Create(ctx, infraService1)
-
-			for i := 0; i < getCount; i++ {
-				infraService2 := infraService1.DeepCopy()
-				if i == getCount-1 {
-					infraService2.Status = corev1.ServiceStatus{
-						LoadBalancer: corev1.LoadBalancerStatus{
-							Ingress: []corev1.LoadBalancerIngress{
-								{
-									IP: loadBalancerIP,
-								},
-							},
-						},
-					}
-				}
-				c.EXPECT().Get(
-					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-					infraService2.DeepCopyInto(obj.(*corev1.Service))
-				})
-			}
-			lb.config.Selectorless = pointer.Bool(true)
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).To(BeNil())
-			Expect(len(lbStatus.Ingress)).Should(Equal(1))
-			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
-
-		})
-		It("Should return an error if service already exist", func() {
-			expectedError := errors.New("Test error - check if service already exist")
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(errors.New("Test error - check if service already exist"))
-
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-			Expect(lbStatus).To(BeNil())
-		})
-
-		It("Should update existing service with ports changed", func() {
-			changedPort := 30002
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(changedPort)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-			})
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			infraService1.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Update(ctx, infraService1)
-
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).To(BeNil())
-			Expect(len(lbStatus.Ingress)).Should(Equal(1))
-			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
-		})
-
-		It("Should update existing service with no ports changed", func() {
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-			})
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			infraService1.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			lbStatus, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).To(BeNil())
-			Expect(len(lbStatus.Ingress)).Should(Equal(1))
-			Expect(lbStatus.Ingress[0].IP).Should(Equal(loadBalancerIP))
-		})
-
-		It("Should return an error while updating existing service with ports changed ", func() {
-			expectedError := errors.New("Test error - update Service")
-			changedPort := 30002
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(changedPort)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-			})
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			infraService1.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Update(ctx, infraService1).Return(errors.New("Test error - update Service"))
-
-			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-		})
-
-		It("Should return  an error if service creation failed", func() {
-			expectedError := errors.New("Test error - Create Service")
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(notFoundErr)
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			c.EXPECT().Create(ctx, infraService1).Return(errors.New("Test error - Create Service"))
-
-			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-		})
-
-		It("Should return and error if polling LoadBalancer service 1-time fails", func() {
-			expectedError := errors.New("Test error - poll Service")
-			getCount := 1
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(notFoundErr)
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			c.EXPECT().Create(ctx, infraService1)
-
-			for i := 0; i < getCount; i++ {
-				infraService2 := infraService1.DeepCopy()
-				if i == getCount-1 {
-					infraService2.Status = corev1.ServiceStatus{
-						LoadBalancer: corev1.LoadBalancerStatus{
-							Ingress: []corev1.LoadBalancerIngress{
-								{
-									IP: loadBalancerIP,
-								},
-							},
-						},
-					}
-				}
-				c.EXPECT().Get(
-					ctx,
-					client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-					gomock.AssignableToTypeOf(&corev1.Service{}),
-				).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-					infraService2.DeepCopyInto(obj.(*corev1.Service))
-				}).Return(errors.New("Test error - poll Service"))
-			}
-
-			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-		})
-
-		It("Should return an error if polling LoadBalancer service fails but success before timeout", func() {
-			expectedError := errors.New("Test error - poll Service")
-			getCount := *lb.config.CreationPollTimeout / *lb.config.CreationPollInterval
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(notFoundErr)
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			c.EXPECT().Create(ctx, infraService1)
-
-			for i := 0; i < getCount; i++ {
-				infraService2 := infraService1.DeepCopy()
-				if i == getCount-1 {
-					c.EXPECT().Get(
-						ctx,
-						client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-						gomock.AssignableToTypeOf(&corev1.Service{}),
-					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-						infraService2.DeepCopyInto(obj.(*corev1.Service))
-					}).Return(errors.New("Test error - poll Service"))
-				} else {
-					c.EXPECT().Get(
-						ctx,
-						client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-						gomock.AssignableToTypeOf(&corev1.Service{}),
-					).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-						infraService2.DeepCopyInto(obj.(*corev1.Service))
-					})
-				}
-			}
-
-			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-		})
-
-		AfterAll(func() {
-			ctrl.Finish()
-		})
-
-		It("Should return an error if polling LoadBalancer returns no IPs after some time", func() {
-			expectedError := errors.New("timed out waiting for the condition")
-
-			c.EXPECT().
-				Get(ctx, client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"}, gomock.AssignableToTypeOf(&corev1.Service{})).
-				Return(notFoundErr)
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			c.EXPECT().Create(ctx, infraService1)
-
-			infraService2 := infraService1.DeepCopy()
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraService2.DeepCopyInto(obj.(*corev1.Service))
+			tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+				svc.DeepCopyInto(obj.(*corev1.Service))
+				return nil
 			}).AnyTimes()
+			tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil).AnyTimes()
 
-			_, err := lb.EnsureLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(MatchError(expectedError))
+			start := time.Now()
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			elapsed := time.Since(start)
+
+			Expect(err).To(MatchError(ContainSubstring("no free floating ip in pool")))
+			// Must not burn the whole CreationPollTimeout (5s) waiting on a
+			// state that never changes.
+			Expect(elapsed).To(BeNumerically("<", 3*time.Second))
 		})
 
-		AfterAll(func() {
+		It("Should use a fresh idempotency key when recreating a stuck load balancer", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-recreated",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				// The existing LB never leaves PENDING...
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{Id: "lb-stuck", State: loadbalancerv1.State_STATE_PENDING},
+				},
+				// ...but its replacement comes up healthy.
+				getRespAfterCreate: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-recreated",
+						Ip:       "192.168.0.30",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.9",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+				deleteResp: &loadbalancerv1.DeleteLoadBalancerResponse{Id: "lb-stuck"},
+			}
+			lb.rpcClient = fakeRPC
+			lb.retryCounts = map[string]int{}
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{
+				LoadBalancerIDAnnotationKey:          "lb-stuck",
+				LoadBalancerCreateCountAnnotationKey: "1",
+				// Matching hash, so the retry counter is what advances rather
+				// than the "config changed" branch.
+				LoadBalancerListenerHashAnnotationKey: listenersHashStr(lb.buildListeners(ctx, svc, []*corev1.Node{}, clusterName)),
+			}
+
+			tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+				svc.DeepCopyInto(obj.(*corev1.Service))
+				return nil
+			}).AnyTimes()
+			tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil).AnyTimes()
+
+			// Drive the retry counter up to the recreate threshold: the LB is
+			// stuck in PENDING, so each call increments and errors out.
+			for i := 0; i < maxLoadBalancerRetries; i++ {
+				_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+				Expect(err).To(HaveOccurred())
+			}
+			Expect(fakeRPC.createReqs).To(BeEmpty())
+
+			// Threshold reached: the LB is deleted and recreated.
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(fakeRPC.createReqs).To(HaveLen(1))
+			Expect(fakeRPC.createReqs[0].IdempotencyKey).ToNot(Equal(string(svc.UID)))
+			_, parseErr := uuid.Parse(fakeRPC.createReqs[0].IdempotencyKey)
+			Expect(parseErr).NotTo(HaveOccurred())
+		})
+
+		It("Should update load balancer when annotation exists", func() {
+			fakeRPC := &fakeRPCClient{
+				updateResp: &loadbalancerv1.UpdateLoadBalancerResponse{
+					Id:    "lb-existing",
+					State: loadbalancerv1.State_STATE_READY,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-existing",
+						Ip:       "192.168.0.20",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.1",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+			}
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-existing"}
+
+			gomock.InOrder(
+				// ensureServiceAnnotation for listener hash: Get
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				// ensureServiceAnnotation for listener hash: Update
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKey(LoadBalancerListenerHashAnnotationKey))
+					return nil
+				}),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.1"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		It("Should return error if RPC create fails", func() {
+			fakeRPC := &fakeRPCClient{
+				createErr: errors.New("rpc create failed"),
+			}
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			_, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should create load balancer in internal mode with internal IP as status", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-internal",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:    "lb-internal",
+						Ip:    "10.0.0.50",
+						State: loadbalancerv1.State_STATE_READY,
+					},
+				},
+			}
+			lb.config.IpType = "internal"
+			lb.config.FipNetworkID = ""
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("10.0.0.50"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		It("Should create load balancer in both mode with FIP as status and internal IP as annotation", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-both",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-both",
+						Ip:       "10.0.0.60",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.10",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+			}
+			lb.config.IpType = "both"
+			lb.config.FipNetworkID = "fip-net"
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-both"))
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				// storeInternalIpIfBothMode: Get + Update for internal IP annotation
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerInternalIPAnnotationKey, "10.0.0.60"))
+					return nil
+				}),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.10"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		It("Should skip service when OnlyServiceController is true and annotations are missing", func() {
+			fakeRPC := &fakeRPCClient{}
+			lb.config.OnlyServiceController = true
+			lb.config.FipNetworkID = "fip-net"
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{}
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).To(MatchError(ContainSubstring("implemented by alternate")))
+			Expect(status).To(BeNil())
+		})
+
+		It("Should return not exists in GetLoadBalancer when OnlyServiceController is true and annotations are missing", func() {
+			fakeRPC := &fakeRPCClient{}
+			lb.config.OnlyServiceController = true
+			lb.config.FipNetworkID = "fip-net"
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{}
+
+			status, exists, err := lb.GetLoadBalancer(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exists).To(BeFalse())
+			Expect(status).To(BeNil())
+		})
+
+		It("Should create load balancer with annotation config when OnlyServiceController is true", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-anno",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-anno",
+						Ip:       "10.0.0.70",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.2",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+			}
+			lb.config.OnlyServiceController = true
+			lb.config.FipNetworkID = "fip-net"
+			lb.config.NetworkID = ""
+			lb.config.SubnetID = ""
+			lb.config.TenantID = ""
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{
+				ServiceNetworkIDAnnotationKey: "anno-net-1",
+				ServiceSubnetIDAnnotationKey:  "anno-sub-1",
+				ServiceTenantIDAnnotationKey:  "anno-tenant-1",
+			}
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					updated := obj.(*corev1.Service)
+					Expect(updated.Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-anno"))
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					return nil
+				}),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.2"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		It("Should set ipMode Proxy and patch KamajiControlPlane in internal mode with OnlyServiceController", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-internal-osc",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:    "lb-internal-osc",
+						Ip:    "10.0.0.80",
+						State: loadbalancerv1.State_STATE_READY,
+					},
+				},
+			}
+			lb.config.OnlyServiceController = true
+			lb.config.IpType = "internal"
+			lb.config.FipNetworkID = ""
+			lb.config.NetworkID = ""
+			lb.config.SubnetID = ""
+			lb.config.TenantID = ""
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Labels = map[string]string{"kamaji.clastix.io/name": "capi-slowstart-kubevirt"}
+			svc.Annotations = map[string]string{
+				ServiceNetworkIDAnnotationKey: "anno-net-1",
+				ServiceSubnetIDAnnotationKey:  "anno-sub-1",
+				ServiceTenantIDAnnotationKey:  "anno-tenant-1",
+			}
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					Expect(obj.(*corev1.Service).Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-internal-osc"))
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil),
+				tenantC.EXPECT().Patch(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("10.0.0.80"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeProxy))
+		})
+
+		It("Should patch KamajiControlPlane in external mode with OnlyServiceController", func() {
+			fakeRPC := &fakeRPCClient{
+				createResp: &loadbalancerv1.CreateLoadBalancerResponse{
+					Id:    "lb-ext-osc",
+					State: loadbalancerv1.State_STATE_PENDING,
+				},
+				getResp: &loadbalancerv1.GetLoadBalancerResponse{
+					LoadBalancer: &loadbalancerv1.LoadBalancer{
+						Id:       "lb-ext-osc",
+						Ip:       "10.0.0.90",
+						State:    loadbalancerv1.State_STATE_READY,
+						Fip:      "203.0.113.5",
+						FipState: loadbalancerv1.FipState_FIP_STATE_ACTIVE,
+					},
+				},
+			}
+			lb.config.OnlyServiceController = true
+			lb.config.IpType = "external"
+			lb.config.FipNetworkID = "fip-net"
+			lb.config.NetworkID = ""
+			lb.config.SubnetID = ""
+			lb.config.TenantID = ""
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Labels = map[string]string{"kamaji.clastix.io/name": "capi-slowstart-kubevirt"}
+			svc.Annotations = map[string]string{
+				ServiceNetworkIDAnnotationKey: "anno-net-2",
+				ServiceSubnetIDAnnotationKey:  "anno-sub-2",
+				ServiceTenantIDAnnotationKey:  "anno-tenant-2",
+			}
+
+			gomock.InOrder(
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+					Expect(obj.(*corev1.Service).Annotations).To(HaveKeyWithValue(LoadBalancerIDAnnotationKey, "lb-ext-osc"))
+					return nil
+				}),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil),
+				tenantC.EXPECT().Get(ctx, client.ObjectKey{Name: "service1", Namespace: "test"}, gomock.Any()).DoAndReturn(func(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					svc.DeepCopyInto(obj.(*corev1.Service))
+					return nil
+				}),
+				tenantC.EXPECT().Update(ctx, gomock.Any()).Return(nil),
+				tenantC.EXPECT().Patch(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil),
+			)
+
+			status, err := lb.EnsureLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Ingress).To(HaveLen(1))
+			Expect(status.Ingress[0].IP).To(Equal("203.0.113.5"))
+			Expect(status.Ingress[0].IPMode).ToNot(BeNil())
+			Expect(*status.Ingress[0].IPMode).To(Equal(corev1.LoadBalancerIPModeVIP))
+		})
+
+		AfterEach(func() {
 			ctrl.Finish()
 		})
-
 	})
 
 	Context("With updating loadbalancer", Ordered, func() {
-
 		var (
-			c              *mockclient.MockClient
-			ctrl           *gomock.Controller
-			ctx            context.Context
-			lb             *loadbalancer
-			tenantService  *corev1.Service
-			nodes          []*corev1.Node
-			loadBalancerIP string
+			ctrl    *gomock.Controller
+			ctx     context.Context
+			lb      *loadbalancer
+			tenantC *mockclient.MockClient
 		)
 
-		BeforeAll(func() {
+		BeforeEach(func() {
 			ctrl, ctx = gomock.WithContext(context.Background(), GinkgoT())
-			c = mockclient.NewMockClient(ctrl)
-
+			tenantC = mockclient.NewMockClient(ctrl)
+			c := mockclient.NewMockClient(ctrl)
 			lb = &loadbalancer{
-				namespace: "test",
-				client:    c,
+				namespace:    "test",
+				client:       c,
+				tenantClient: tenantC,
 				config: LoadBalancerConfig{
 					CreationPollInterval: pointer.Int(1),
+					CreationPollTimeout:  pointer.Int(5),
+					FipNetworkID:        "fip-net",
 				},
+				rpcClient: nil,
 			}
-
-			tenantService = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "service1",
-					UID:  types.UID("f6ebf172-2bb1-11e9-b210-d663bd873d93"),
-					Annotations: map[string]string{
-						"annotation-key-1": "annotation-val-1",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Type: corev1.ServiceTypeLoadBalancer,
-					Ports: []corev1.ServicePort{
-						{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30001},
-					},
-					ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
-				},
-			}
-			nodes = []*corev1.Node{}
-			loadBalancerIP = "123.456.7.8"
-
+			c.EXPECT().List(ctx, gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 		})
 
-		It("Should update loadbalancer Service with ports changed", func() {
-			changedPort := 30002
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(changedPort)}},
-				},
-			)
-
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-			})
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-
-			infraService1.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Update(ctx, infraService1)
-
-			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).ShouldNot(HaveOccurred())
-
+		It("Should return error if RPC client is nil", func() {
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-1"}
+			err := lb.UpdateLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).To(MatchError(ContainSubstring("RPC client is not configured")))
 		})
 
-		It("Should update loadbalancer Service with ports not changed", func() {
-			port := 30001
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(port)}},
-				},
-			)
-
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-			})
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-			infraService1.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).ShouldNot(HaveOccurred())
-
+		It("Should return error if annotation is missing", func() {
+			fakeRPC := &fakeRPCClient{}
+			lb.rpcClient = fakeRPC
+			svc := newTenantService()
+			err := lb.UpdateLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).To(MatchError(ContainSubstring("load balancer ID not found")))
 		})
 
-		It("Should return an error if get service fails", func() {
-			expectedError := errors.New("Test error - Get Service")
-			changedPort := 30002
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(changedPort)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
+		It("Should update load balancer via RPC", func() {
+			fakeRPC := &fakeRPCClient{updateResp: &loadbalancerv1.UpdateLoadBalancerResponse{}}
+			lb.rpcClient = fakeRPC
 
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Return(errors.New("Test error - Get Service"))
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-1"}
 
-			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
+			err := lb.UpdateLoadBalancer(ctx, clusterName, svc, []*corev1.Node{})
+			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("Should return an error if service not found", func() {
-			expectedError := notFoundErr
-			changedPort := 30002
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(changedPort)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Return(notFoundErr)
-
-			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-		})
-
-		It("Should return an error if update fails with ports changed", func() {
-			expectedError := errors.New("Test error - update Service")
-			changedPort := 30002
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: int32(changedPort)}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-			})
-
-			infraService1 := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30001}},
-				},
-			)
-			infraService1.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
-					},
-				},
-			}
-
-			c.EXPECT().Update(ctx, infraService1).Return(errors.New("Test error - update Service"))
-
-			err := lb.UpdateLoadBalancer(ctx, clusterName, tenantService, nodes)
-			Expect(err).Should(Equal(expectedError))
-		})
-
-		AfterAll(func() {
+		AfterEach(func() {
 			ctrl.Finish()
 		})
 	})
 
 	Context("With ensuring loadbalancer is deleted", Ordered, func() {
-
 		var (
-			c              *mockclient.MockClient
-			ctrl           *gomock.Controller
-			ctx            context.Context
-			lb             *loadbalancer
-			tenantService  *corev1.Service
-			loadBalancerIP string
+			ctrl    *gomock.Controller
+			ctx     context.Context
+			lb      *loadbalancer
+			tenantC *mockclient.MockClient
 		)
 
-		BeforeAll(func() {
+		BeforeEach(func() {
 			ctrl, ctx = gomock.WithContext(context.Background(), GinkgoT())
-			c = mockclient.NewMockClient(ctrl)
-
-			lb = &loadbalancer{
-				namespace: "test",
-				client:    c,
-				config: LoadBalancerConfig{
-					CreationPollInterval: pointer.Int(1),
-				},
-			}
-
-			tenantService = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "service1",
-					UID:  types.UID("f6ebf172-2bb1-11e9-b210-d663bd873d93"),
-					Annotations: map[string]string{
-						"annotation-key-1": "annotation-val-1",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Type: corev1.ServiceTypeLoadBalancer,
-					Ports: []corev1.ServicePort{
-						{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, NodePort: 30001},
-					},
-					ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
-				},
-			}
-
-			loadBalancerIP = "123.456.7.8"
+			tenantC = mockclient.NewMockClient(ctrl)
+			lb = newTestLoadBalancerWithTenantClient(ctrl, tenantC, nil)
 		})
 
-		DescribeTable("Ensure loadbalancer deleted", func(getSvcErr error, deleteSvcErr error, expectedError error) {
-			infraServiceExist := generateInfraService(
-				tenantService,
-				[]corev1.ServicePort{
-					{Name: "port1", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: 30002}},
-				},
-			)
-			infraServiceExist.Status = corev1.ServiceStatus{
-				LoadBalancer: corev1.LoadBalancerStatus{
-					Ingress: []corev1.LoadBalancerIngress{
-						{
-							IP: loadBalancerIP,
-						},
+		It("Should delete load balancer by annotation ID", func() {
+			fakeRPC := &fakeRPCClient{deleteResp: &loadbalancerv1.DeleteLoadBalancerResponse{}}
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-1"}
+
+			err := lb.EnsureLoadBalancerDeleted(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("Should handle RPC not found as success", func() {
+			fakeRPC := &fakeRPCClient{deleteErr: status.Error(codes.NotFound, "not found")}
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+			svc.Annotations = map[string]string{LoadBalancerIDAnnotationKey: "lb-1"}
+
+			err := lb.EnsureLoadBalancerDeleted(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("Should find LB by name and delete if annotation is missing", func() {
+			fakeRPC := &fakeRPCClient{
+				listResp: &loadbalancerv1.ListLoadBalancersResponse{
+					LoadBalancers: []*loadbalancerv1.LoadBalancerSummary{
+						{Name: lbServiceName, Id: "lb-found"},
 					},
 				},
+				deleteResp: &loadbalancerv1.DeleteLoadBalancerResponse{},
 			}
-			c.EXPECT().Get(
-				ctx,
-				client.ObjectKey{Name: "af6ebf1722bb111e9b210d663bd873d9", Namespace: "test"},
-				gomock.AssignableToTypeOf(&corev1.Service{}),
-			).Do(func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) {
-				if getSvcErr == nil {
-					infraServiceExist.DeepCopyInto(obj.(*corev1.Service))
-				}
-			}).Return(getSvcErr)
-			if getSvcErr == nil {
-				c.EXPECT().Delete(ctx, infraServiceExist).Return(deleteSvcErr)
-			}
+			lb.rpcClient = fakeRPC
 
-			err := lb.EnsureLoadBalancerDeleted(ctx, clusterName, tenantService)
-			if expectedError == nil {
-				Expect(err).ShouldNot(HaveOccurred())
-			} else {
-				Expect(err).Should(Equal(expectedError))
-			}
-		},
-			Entry("Delete Service Success", nil, nil, nil),
-			Entry("Delete Service Success - service doesn't exist", notFoundErr, nil, nil),
-			Entry("Get Service Error", errors.New("Test error - Get Service"), nil, errors.New("Test error - Get Service")),
-			Entry("Delete Service Error", nil, errors.New("Test error - Delete Service"), errors.New("Test error - Delete Service")),
-		)
+			svc := newTenantService()
 
-		AfterAll(func() {
+			err := lb.EnsureLoadBalancerDeleted(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("Should succeed when load balancer not found", func() {
+			fakeRPC := &fakeRPCClient{}
+			lb.rpcClient = fakeRPC
+
+			svc := newTenantService()
+
+			err := lb.EnsureLoadBalancerDeleted(ctx, clusterName, svc)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
 			ctrl.Finish()
 		})
+	})
 
+	Context("With deriving create idempotency keys", func() {
+		svc := newTenantService()
+
+		It("Should reuse the service UID for the first attempt", func() {
+			Expect(createIdempotencyKey(svc, 0)).To(Equal(string(svc.UID)))
+		})
+
+		It("Should be stable for a given attempt", func() {
+			Expect(createIdempotencyKey(svc, 2)).To(Equal(createIdempotencyKey(svc, 2)))
+		})
+
+		It("Should differ between attempts and stay a valid UUID", func() {
+			keys := map[string]bool{}
+			for attempt := 0; attempt <= 3; attempt++ {
+				key := createIdempotencyKey(svc, attempt)
+				_, err := uuid.Parse(key)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(keys).NotTo(HaveKey(key))
+				keys[key] = true
+			}
+		})
+
+		It("Should still produce a UUID when the service UID is not one", func() {
+			odd := newTenantService()
+			odd.UID = types.UID("not-a-uuid")
+			_, err := uuid.Parse(createIdempotencyKey(odd, 1))
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 })

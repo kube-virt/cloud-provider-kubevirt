@@ -1,0 +1,8 @@
+# Chart dependencies
+charts/
+
+# Crds
+crds/
+
+# Values override
+values.local.yaml
