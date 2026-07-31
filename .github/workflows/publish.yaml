@@ -44,12 +44,11 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            latest=false
+          flavor: latest=false
           labels: |
             name="KubeVirt Cloud Controller Manager"
-            maintainer=KubeVirt
-            vendor=KubeVirt
+            maintainer=Appscode
+            vendor=Appscode
             version={{tag}}
             release={{tag}}
             summary=Cloud Controller Manager for KubeVirt
@@ -70,14 +69,17 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}-ubi
+          # Same ref-based tag as the default image, plus a -ubi suffix.
+          # type=semver is deliberately not used here: it ignores `pattern`
+          # for pre-release tags (v0.1.0-ac parses as 0.1.0 pre-release "ac"),
+          # which silently dropped the -ubi suffix and the leading v.
           flavor: |
             latest=false
+            suffix=-ubi
           labels: |
             name="KubeVirt Cloud Controller Manager"
-            maintainer=KubeVirt
-            vendor=KubeVirt
+            maintainer=Appscode
+            vendor=Appscode
             version={{tag}}
             release={{tag}}
             summary=Cloud Controller Manager for KubeVirt
