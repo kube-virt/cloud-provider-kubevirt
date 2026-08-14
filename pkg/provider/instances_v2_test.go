@@ -383,6 +383,103 @@ var _ = Describe("Instances V2", func() {
 				}))
 			})
 
+			It("Should drop the link-local address the kernel derives from the NIC MAC", func() {
+				vmiName := "test-vm-link-local"
+				namespace := "cluster-qwedas"
+				i := instancesV2{
+					namespace: namespace,
+					client:    mockClient,
+					config: &InstancesV2Config{
+						Enabled:              true,
+						ZoneAndRegionEnabled: false,
+					},
+				}
+
+				vmi := kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      vmiName,
+						Namespace: namespace,
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+							{
+								IP:   "10.0.0.7",
+								IPs:  []string{"10.0.0.7", "fe80::f816:3eff:fec8:39f3"},
+								Name: "default",
+							},
+						},
+					},
+				}
+
+				tenantNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vmiName,
+					},
+				}
+
+				mockClient.EXPECT().
+					Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
+					SetArg(2, vmi).
+					Times(1)
+
+				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
+				Expect(err).To(BeNil())
+				Expect(metadata.NodeAddresses).To(Equal([]corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: "10.0.0.7"},
+				}))
+			})
+
+			It("Should fall back to the last known internal IP when the default interface only reports a link-local", func() {
+				vmiName := "test-vm-only-link-local"
+				namespace := "cluster-qwedas"
+				i := instancesV2{
+					namespace: namespace,
+					client:    mockClient,
+					config: &InstancesV2Config{
+						Enabled:              true,
+						ZoneAndRegionEnabled: false,
+					},
+				}
+
+				vmi := kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      vmiName,
+						Namespace: namespace,
+					},
+					Status: kubevirtv1.VirtualMachineInstanceStatus{
+						Interfaces: []kubevirtv1.VirtualMachineInstanceNetworkInterface{
+							{
+								IP:   "fe80::f816:3eff:fec8:39f3",
+								IPs:  []string{"fe80::f816:3eff:fec8:39f3"},
+								Name: "default",
+							},
+						},
+					},
+				}
+
+				tenantNode := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: vmiName,
+					},
+					Status: corev1.NodeStatus{
+						Addresses: []corev1.NodeAddress{
+							{Type: corev1.NodeInternalIP, Address: "10.0.0.7"},
+						},
+					},
+				}
+
+				mockClient.EXPECT().
+					Get(ctx, types.NamespacedName{Name: vmiName, Namespace: namespace}, gomock.AssignableToTypeOf(&kubevirtv1.VirtualMachineInstance{})).
+					SetArg(2, vmi).
+					Times(1)
+
+				metadata, err := i.InstanceMetadata(ctx, &tenantNode)
+				Expect(err).To(BeNil())
+				Expect(metadata.NodeAddresses).To(Equal([]corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: "10.0.0.7"},
+				}))
+			})
+
 			It("Should fetch a vmi by node name and return a complete metadata object - zone and region disabled", func() {
 				vmiName := "test-vm"
 				namespace := "cluster-qwedas"

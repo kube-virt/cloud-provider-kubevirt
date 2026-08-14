@@ -41,29 +41,37 @@ Container image / release targets live in the `Makefile` (upstream, unchanged).
 
 ## 3. Regenerating the protobuf code
 
-The proto is a vendored copy of the LoadBalancer API's
-`loadbalancer/v1/loadbalancer.proto` (`plan/new.proto` is the upstream snapshot;
-`pkg/rpc/loadbalancer/gen/loadbalancer.proto` is what was actually generated
-from). It imports `buf/validate/validate.proto`, so that dependency must be on
-the include path.
-
-The checked-in code was produced with protoc v6.30.0 / protoc-gen-go v1.36.11,
-overriding the upstream `go_package` so the generated package resolves inside
-this module:
+`pkg/rpc/loadbalancer/gen/loadbalancer.proto` is a verbatim copy of the
+LoadBalancer API's `proto/loadbalancer/v1/loadbalancer.proto`. Refresh it and the
+generated code together:
 
 ```bash
-protoc \
-  -I . -I "$(buf_validate_include_dir)" \
-  --go_out=. --go_opt=module=kubevirt.io/cloud-provider-kubevirt \
-  --go_opt=Mpkg/rpc/loadbalancer/gen/loadbalancer.proto=kubevirt.io/cloud-provider-kubevirt/pkg/rpc/loadbalancer/gen \
-  --go-grpc_out=. --go-grpc_opt=module=kubevirt.io/cloud-provider-kubevirt \
-  --go-grpc_opt=Mpkg/rpc/loadbalancer/gen/loadbalancer.proto=kubevirt.io/cloud-provider-kubevirt/pkg/rpc/loadbalancer/gen \
-  pkg/rpc/loadbalancer/gen/loadbalancer.proto
+hack/update-proto.sh [path/to/loadbalancer.proto]   # defaults to ../loadbalancer-api/...
 ```
 
+The script copies the proto in and runs `buf` with the local `protoc-gen-go` /
+`protoc-gen-go-grpc` plugins, overriding the upstream `go_package` so the
+generated package resolves inside this module. Notes on why it looks the way it
+does:
+
+* The proto has to stay at `pkg/rpc/loadbalancer/gen/loadbalancer.proto` inside
+  the buf module. That path is baked into the generated `source:` header and into
+  the global proto registry key, so moving it would be a silent behaviour change.
+* `buf` runs in a throwaway workspace so no `buf.yaml` has to live in this repo.
+  The workspace carries a `buf.lock` pinning `buf.build/bufbuild/protovalidate`,
+  which makes generation work offline once that module has been fetched once.
+* The generated file's blank import of the protovalidate Go bindings is stripped.
+  Nothing here reads the options at runtime, they survive in the raw descriptor
+  regardless, and keeping the import would add a module dependency purely so an
+  unused extension can register itself.
+
+After regenerating, check `git diff --stat pkg/rpc/loadbalancer/gen/` — only the
+proto and the two `.pb.go` files should move.
+
 The `buf.validate` options are **not** enforced client-side — they are
-documentation here and are evaluated by the server. Read them anyway when
-building requests; several are easy to trip (see §7).
+documentation here and are evaluated by the server's protovalidate interceptor,
+*before* the handler and its Go-side defaults run. Read them when building
+requests; several are easy to trip (see §7).
 
 ## 4. Configuration plumbing
 
@@ -98,21 +106,43 @@ tests.
 
 ## 6. Extension points
 
-**A different protocol per port.** Today `buildListeners` decides TCP vs HTTP
-once, from the presence of `kubevirt.io/http-path`, and applies it to every port.
-Per-port control would mean keying annotations by `ServicePort.Name`
+**A different HTTP route per port.** Today `buildListeners` decides TCP vs HTTP
+once, from the presence of `kubevirt.io/http-path`, and applies it to every TCP
+port. Per-port control would mean keying annotations by `ServicePort.Name`
 (e.g. `kubevirt.io/http-path.<port-name>`) and reading them inside the port loop.
+
+**Several rules per HTTP listener.** `ListenerRule` supports up to 16 rules per
+HTTP listener, each with its own matches, backends and health monitor; the CCM
+emits exactly one. Exposing that would mean an annotation format rich enough to
+carry a rule list, plus extending `mergeListenerIDs` — which currently matches
+rules and backends by position, valid only because there is exactly one of each.
+
+**Weighted backends.** A rule may carry up to 16 `RuleBackend`s with independent
+weights (a canary split, say). The CCM emits one at weight 1. Note that weight 0
+is only honoured on a backend that already has an id; on a new one the server
+rewrites it to 1, and a rule whose backends are all 0 is rejected outright.
+
+**Hostname routing.** `Listener.hostnames` scopes a listener to specific HTTP
+`Host` values. No annotation feeds it today, so it is always empty (= any host).
 
 **Tunable health monitors.** The `defaultHealthMonitor*` constants are compiled
 in. Expose them as annotations or config if needed — but keep
 `timeout < interval`, which the server enforces.
 
-**UDP listeners.** The proto has `PROTOCOL_UDP`; `buildListeners` never emits it.
-`ServicePort.Protocol` is currently ignored.
+**Backend selection.** `buildEndpoints` uses node internal IP + NodePort, with
+an external-IP fallback and then a VMI-label fallback (the VMI's `default`
+interface only — the others belong to the CNI running inside the guest).
+Addresses are filtered through `isUsableNodeIP`. `ExternalTrafficPolicy: Local`
+is not honoured — all nodes are used as backends regardless.
 
-**Backend selection.** `buildBackendRefs` uses node internal IP + NodePort, with
-an external-IP fallback and then a VMI-label fallback. `ExternalTrafficPolicy:
-Local` is not honoured — all nodes are used as backends regardless.
+**Unused RPCs.** The generated client also carries `CreateListener` /
+`ModifyListener` / `CreateRule` / `ModifyRule` / `SetRulePriorities`,
+`BatchDeleteLoadBalancers`, `AllocateFloatingIp` / `ReleaseFloatingIp` and
+`Ping` / `AuthenticatedPing`. None are called. The rule-level RPCs would let an
+update touch one rule instead of resending every listener; `AuthenticatedPing`
+would let the CCM verify its API key at startup (check `auth_enforced` on the
+response — against a server with no API key configured it succeeds for any
+token).
 
 **Security groups / QoS.** Hard-coded to `security_group_disabled: true` and
 `qos_policy_disabled: true` on both create and update. Both have `*_id` fields in
@@ -129,14 +159,38 @@ the proto if you want to wire them to config.
   CEL rule allows the dashless form too). The tenant fallback to
   `service.Namespace` therefore only works when namespaces are named after the
   OpenStack project ID.
-* **A listener needs ≥ 1 backend.** Create/update is rejected outright when the
-  node list is empty and the VMI fallback finds nothing.
+* **Endpoint IPs are validated more strictly downstream than by the API.** The
+  proto only asks for `string.ip`, which accepts a link-local address; the
+  LoadBalancer controller renders each endpoint into an Envoy Gateway `Backend`,
+  whose CRD pattern for `endpoints[].ip.address` does not match `fe80::…`. The
+  rejected `Backend` leaves the `LoadBalancerClaim` un-`Ready`, and the load
+  balancer fails 15 minutes later with `Provisioning timed out` — one unusable
+  endpoint kills the whole LB, not just that member. Hence `isUsableNodeIP`, on
+  both the node-address and the endpoint path.
+* **A listener needs ≥ 1 rule, a rule ≥ 1 backend, a backend ≥ 1 endpoint.**
+  `validateListeners` fails the reconcile with a readable reason when the node
+  list is empty and the VMI fallback finds nothing, rather than letting the server
+  reject it.
+* **`weight` must be ≥ 1 on a new backend.** The `rule-weight-sum` CEL rule runs
+  in the server's validation interceptor, before the handler's "unset means 1"
+  default, so a lone backend at weight 0 is a hard `InvalidArgument`.
 * **HTTP listeners must carry a full health monitor** — path starting with `/`,
   a non-zero method, and a non-empty `expected_status_codes`. `buildListeners`
   satisfies this; keep it that way if you refactor.
-* **`http_route` is only valid on HTTP listeners.**
-* **`UpdateLoadBalancer` replaces the listener list wholesale.** Always send the
-  complete desired set.
+* **Matches are HTTP-only, and an empty match is not the same as no matches.**
+  TCP/UDP listeners must carry exactly one rule with no matches; on HTTP, an
+  empty `matches` list is the catch-all while an `HttpRouteMatch` that constrains
+  nothing is rejected.
+* **`UpdateLoadBalancer` replaces the listener list wholesale and reconciles by
+  id.** Always send the complete desired set, and graft the ids of the current
+  listeners onto it (`mergeListenerIDs`) — anything sent without a known id is
+  recreated from scratch, taking its generated data plane objects with it. Note
+  that the update is `AllCols()` server-side: a field you omit from a listener is
+  reset to its zero value.
+* **Sending an empty listener list is a no-op, not a delete.** The server skips
+  the whole listener block when `len(listeners) == 0`.
+* **`ListLoadBalancers` rejects `page_size` below 1**, so the delete-by-name
+  fallback has to set it explicitly and follow `next_page_token`.
 * **The retry counter (`retryCounts`) is in-memory** and keyed by Service UID; it
   resets on restart. The recreate counter is an annotation, so it survives.
 * **`EnsureLoadBalancer` blocks** for up to `creationPollTimeout` while polling.
@@ -144,10 +198,10 @@ the proto if you want to wire them to config.
 * **Every RPC attempt needs a deadline.** `retryOnFailure` wraps each attempt in
   `Config.Timeout`; keep it that way. Calls pass `grpc.WaitForReady(true)`, so a
   call made on a bare caller context never returns while the server is down.
-* **Several `ensureServiceAnnotation` calls ignore their error** (create-count,
-  listener-hash, internal-ip). Only the `loadbalancer-id` write is treated as
-  fatal — which is the right priority, but it means the hash can drift and cause
-  a redundant update on the next sync.
+* **Only the `loadbalancer-id` annotation write is fatal.** The others
+  (create-count, listener-hash, internal-ip) are logged and carried on from,
+  which is the right priority — but a hash that never lands makes every
+  subsequent sync look like a config change.
 * **`pendingStatus()` is currently unused** — provisioning is synchronous, so
   nothing publishes a `pending` hostname. Remove it or use it if you make the
   path asynchronous.

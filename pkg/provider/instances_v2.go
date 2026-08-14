@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 
 	corev1 "k8s.io/api/core/v1"
@@ -143,13 +144,14 @@ func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNe
 		}
 
 		for _, ip := range iface.IPs {
-			if ip != "" {
-				v1helper.AddToNodeAddresses(&addrs, corev1.NodeAddress{
-					Type:    corev1.NodeInternalIP,
-					Address: ip,
-				})
-				foundInternalIP = true
+			if !isUsableNodeIP(ip) {
+				continue
 			}
+			v1helper.AddToNodeAddresses(&addrs, corev1.NodeAddress{
+				Type:    corev1.NodeInternalIP,
+				Address: ip,
+			})
+			foundInternalIP = true
 		}
 		break
 	}
@@ -161,13 +163,29 @@ func (i *instancesV2) getNodeAddresses(ifs []kubevirtv1.VirtualMachineInstanceNe
 	// contacting the qemu guest agent.
 	if !foundInternalIP {
 		for _, prevAddr := range prevAddrs {
-			if prevAddr.Type == corev1.NodeInternalIP {
+			if prevAddr.Type == corev1.NodeInternalIP && isUsableNodeIP(prevAddr.Address) {
 				v1helper.AddToNodeAddresses(&addrs, prevAddr)
 			}
 		}
 	}
 
 	return addrs
+}
+
+// isUsableNodeIP reports whether addr is an address other machines can reach.
+// The guest agent lists every address on the interface, and the kernel gives
+// every IPv6-capable NIC a link-local address derived from its own MAC, so the
+// real address always arrives with a fe80:: companion. Advertising one as a node
+// address is meaningless - it is only valid on the local segment - and it is
+// rejected outright further down the stack, where it ends up as a load balancer
+// backend.
+func isUsableNodeIP(addr string) bool {
+	ip := net.ParseIP(addr)
+	return ip != nil &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsLoopback() &&
+		!ip.IsUnspecified()
 }
 
 func (i *instancesV2) getRegionAndZone(ctx context.Context, nodeName string) (string, string, error) {

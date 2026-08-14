@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	stdErrors "errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,10 +35,10 @@ const (
 	DefaultLoadBalancerCreatePollInterval = 5
 	DefaultLoadBalancerCreatePollTimeout  = 300
 
-	TenantServiceNameLabelKey        = "cluster.x-k8s.io/tenant-service-name"
-	TenantServiceNamespaceLabelKey   = "cluster.x-k8s.io/tenant-service-namespace"
-	TenantClusterNameLabelKey        = "cluster.x-k8s.io/cluster-name"
-	TenantNodeRoleLabelKey           = "cluster.x-k8s.io/role"
+	TenantServiceNameLabelKey             = "cluster.x-k8s.io/tenant-service-name"
+	TenantServiceNamespaceLabelKey        = "cluster.x-k8s.io/tenant-service-namespace"
+	TenantClusterNameLabelKey             = "cluster.x-k8s.io/cluster-name"
+	TenantNodeRoleLabelKey                = "cluster.x-k8s.io/role"
 	LoadBalancerIDAnnotationKey           = "kubevirt.io/loadbalancer-id"
 	LoadBalancerCreateCountAnnotationKey  = "kubevirt.io/loadbalancer-create-count"
 	LoadBalancerListenerHashAnnotationKey = "kubevirt.io/loadbalancer-listener-hash"
@@ -50,8 +52,8 @@ const (
 	LoadBalancerFinalizer                 = "service.kubernetes.io/load-balancer-cleanup"
 	LoadBalancerPendingHostname           = "pending"
 
-	maxLoadBalancerRetries        = 10
-	maxLoadBalancerCreateCount    = 3
+	maxLoadBalancerRetries     = 10
+	maxLoadBalancerCreateCount = 3
 
 	defaultHealthMonitorInterval  = int32(10)
 	defaultHealthMonitorTimeout   = int32(5)
@@ -60,6 +62,17 @@ const (
 	defaultHealthCheckPath        = "/"
 	defaultClientConnLimit        = int32(0)
 	defaultAlgorithm              = loadbalancerv1.Algorithm_ALGORITHM_ROUND_ROBIN
+
+	// Every listener this CCM builds carries exactly one rule with exactly one
+	// backend, so the backend needs no distinguishing name. The weight has to be
+	// set explicitly: the API's rule-weight-sum rule rejects a rule whose
+	// backends all have weight 0, and it is evaluated before the server-side
+	// "unset means 1" default can apply.
+	defaultBackendName   = "default"
+	defaultBackendWeight = int32(1)
+
+	// The API caps a page at 200 and rejects anything below 1.
+	listLoadBalancersPageSize = int32(200)
 )
 
 type rpcLBClient interface {
@@ -189,6 +202,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	lbID := service.Annotations[LoadBalancerIDAnnotationKey]
 
 	listeners := lb.buildListeners(ctx, service, nodes, clusterName)
+	if err := validateListeners(listeners); err != nil {
+		return nil, err
+	}
+
 	if lbID == "" {
 		if lb.isFipEnabled(service) && lb.config.FipNetworkID == "" {
 			return nil, fmt.Errorf("FIP network ID is not configured; load balancer creation requires floating IP support")
@@ -228,9 +245,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			return nil, err
 		}
 
-		listenersHash := listenersHashStr(listeners)
-		lb.ensureServiceAnnotation(ctx, service, LoadBalancerCreateCountAnnotationKey, "1")
-		lb.ensureServiceAnnotation(ctx, service, LoadBalancerListenerHashAnnotationKey, listenersHash)
+		if err := lb.ensureServiceAnnotation(ctx, service, LoadBalancerCreateCountAnnotationKey, "1"); err != nil {
+			klog.Errorf("Failed to record create count on service %s/%s: %v", service.Namespace, service.Name, err)
+		}
+		lb.recordListenerHash(ctx, service, listeners)
 
 		lb.clearRetryCount(string(service.UID))
 
@@ -252,8 +270,8 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	if lbStatus != nil && lbStatus.State == loadbalancerv1.State_STATE_READY && lbStatus.Ip != "" {
 		if lb.configChanged(service, listeners) {
 			updateReq := &loadbalancerv1.UpdateLoadBalancerRequest{
-				Id:                   lbID,
-				Listeners:            listeners,
+				Id:                    lbID,
+				Listeners:             mergeListenerIDs(listeners, lbStatus.GetSpec().GetListeners()),
 				SecurityGroupDisabled: pointer.Bool(true),
 				QosPolicyDisabled:     pointer.Bool(true),
 			}
@@ -262,7 +280,7 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 				return nil, stdErrors.New(rpc.ToRPCError(err))
 			}
 
-			lb.ensureServiceAnnotation(ctx, service, LoadBalancerListenerHashAnnotationKey, listenersHashStr(listeners))
+			lb.recordListenerHash(ctx, service, listeners)
 
 			lbStatus, err := lb.pollLoadBalancerReady(ctx, service, lbID)
 			if err != nil {
@@ -336,8 +354,10 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			klog.Errorf("Failed to update service with new LB ID: %v", err)
 			return nil, err
 		}
-		lb.ensureServiceAnnotation(ctx, service, LoadBalancerCreateCountAnnotationKey, strconv.Itoa(createCount+1))
-		lb.ensureServiceAnnotation(ctx, service, LoadBalancerListenerHashAnnotationKey, listenersHashStr(listeners))
+		if err := lb.ensureServiceAnnotation(ctx, service, LoadBalancerCreateCountAnnotationKey, strconv.Itoa(createCount+1)); err != nil {
+			klog.Errorf("Failed to record create count on service %s/%s: %v", service.Namespace, service.Name, err)
+		}
+		lb.recordListenerHash(ctx, service, listeners)
 
 		lb.clearRetryCount(string(service.UID))
 
@@ -352,30 +372,35 @@ func (lb *loadbalancer) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	if lb.configChanged(service, listeners) {
 		updateReq := &loadbalancerv1.UpdateLoadBalancerRequest{
-			Id:                   lbID,
-			Listeners:            listeners,
+			Id:                    lbID,
+			Listeners:             mergeListenerIDs(listeners, lbStatus.GetSpec().GetListeners()),
 			SecurityGroupDisabled: pointer.Bool(true),
 			QosPolicyDisabled:     pointer.Bool(true),
 		}
 		if _, err := lb.rpcClient.UpdateLoadBalancer(ctx, updateReq); err != nil {
 			klog.Errorf("Failed to update load balancer via RPC: %v", err)
+			lb.incrementRetryCount(string(service.UID))
 			return nil, stdErrors.New(rpc.ToRPCError(err))
 		}
 
-		lb.ensureServiceAnnotation(ctx, service, LoadBalancerListenerHashAnnotationKey, listenersHashStr(listeners))
+		lb.recordListenerHash(ctx, service, listeners)
 
 		lbStatus, err := lb.pollLoadBalancerReady(ctx, service, lbID)
 		if err != nil {
+			// This branch is reached only while the load balancer is not ready.
+			// Without counting the attempt, a load balancer whose config keeps
+			// changing while it fails to provision would never reach the
+			// recreate path above.
+			lb.incrementRetryCount(string(service.UID))
 			return nil, err
 		}
+		lb.clearRetryCount(string(service.UID))
 		lb.updateKamajiAdvertiseAddress(ctx, service, lbStatus.Ip)
 		lb.storeInternalIpIfBothMode(ctx, service, lbStatus)
 		return lb.loadBalancerStatusFromResponse(service, lbStatus), nil
 	}
 
-	lb.mu.Lock()
-	lb.retryCounts[string(service.UID)] = retries + 1
-	lb.mu.Unlock()
+	lb.incrementRetryCount(string(service.UID))
 
 	return nil, fmt.Errorf("load balancer %s not ready%s, will retry", lbID, lbErrorDetail(lbStatus))
 }
@@ -420,6 +445,21 @@ func (lb *loadbalancer) clearRetryCount(uid string) {
 	lb.mu.Lock()
 	delete(lb.retryCounts, uid)
 	lb.mu.Unlock()
+}
+
+func (lb *loadbalancer) incrementRetryCount(uid string) {
+	lb.mu.Lock()
+	lb.retryCounts[uid]++
+	lb.mu.Unlock()
+}
+
+// recordListenerHash persists the config fingerprint change detection reads.
+// A failure here is not fatal - the next sync recomputes it - but it has to be
+// visible, because a hash that never lands makes every sync look like a change.
+func (lb *loadbalancer) recordListenerHash(ctx context.Context, service *corev1.Service, listeners []*loadbalancerv1.Listener) {
+	if err := lb.ensureServiceAnnotation(ctx, service, LoadBalancerListenerHashAnnotationKey, listenersHashStr(listeners)); err != nil {
+		klog.Errorf("Failed to record listener hash on service %s/%s: %v", service.Namespace, service.Name, err)
+	}
 }
 
 func (lb *loadbalancer) getEffectiveIpType(service *corev1.Service) string {
@@ -555,42 +595,51 @@ func (lb *loadbalancer) loadBalancerStatusFromResponse(service *corev1.Service, 
 	}
 }
 
+// buildListeners renders the Service as one listener per port. Each listener
+// carries exactly one rule and each rule exactly one backend, whose endpoints
+// are the <node ip>:<node port> pairs traffic is spread across. The API allows
+// several rules per HTTP listener and several weighted backends per rule; a
+// Kubernetes Service has nothing to express with either, so this stays at the
+// shape TCP and UDP listeners are restricted to anyway.
 func (lb *loadbalancer) buildListeners(ctx context.Context, service *corev1.Service, nodes []*corev1.Node, clusterName string) []*loadbalancerv1.Listener {
 	listeners := make([]*loadbalancerv1.Listener, 0, len(service.Spec.Ports))
 
 	for _, port := range service.Spec.Ports {
-		protocol := loadbalancerv1.Protocol_PROTOCOL_TCP
-		if _, hasHTTPRoute := service.Annotations[HTTPRoutePathAnnotationKey]; hasHTTPRoute {
-			protocol = loadbalancerv1.Protocol_PROTOCOL_HTTP
-		}
+		protocol := listenerProtocol(service, port)
 
-		listener := &loadbalancerv1.Listener{
-			Port:        port.Port,
-			Protocol:    protocol,
-			Algorithm:   defaultAlgorithm,
-			TlsEnabled:  false,
-			BackendRefs: lb.buildBackendRefs(ctx, port, nodes, clusterName),
+		rule := &loadbalancerv1.ListenerRule{
+			Algorithm: defaultAlgorithm,
+			Backends: []*loadbalancerv1.RuleBackend{{
+				Name:      defaultBackendName,
+				Weight:    defaultBackendWeight,
+				Endpoints: lb.buildEndpoints(ctx, port, nodes, clusterName),
+			}},
 		}
 
 		if protocol == loadbalancerv1.Protocol_PROTOCOL_HTTP {
 			healthCheckPath := defaultHealthCheckPath
 			healthCheckMethod := loadbalancerv1.HttpMethod_HTTP_METHOD_GET
+			match := &loadbalancerv1.HttpRouteMatch{}
+			matched := false
 			if path, ok := service.Annotations[HTTPRoutePathAnnotationKey]; ok && path != "" {
 				healthCheckPath = path
-				if listener.HttpRoute == nil {
-					listener.HttpRoute = &loadbalancerv1.HttpRoute{}
+				match.Path = &loadbalancerv1.HttpPathMatch{
+					Type:  loadbalancerv1.HttpPathType_HTTP_PATH_TYPE_PREFIX,
+					Value: path,
 				}
-				listener.HttpRoute.Path = path
-				listener.HttpRoute.PathType = loadbalancerv1.HttpPathType_HTTP_PATH_TYPE_PREFIX
+				matched = true
 			}
 			if method, ok := service.Annotations[HTTPRouteMethodAnnotationKey]; ok && method != "" {
 				healthCheckMethod = lb.parseHTTPMethod(method)
-				if listener.HttpRoute == nil {
-					listener.HttpRoute = &loadbalancerv1.HttpRoute{}
-				}
-				listener.HttpRoute.Method = lb.parseHTTPMethod(method)
+				match.Method = healthCheckMethod
+				matched = true
 			}
-			listener.HealthMonitor = &loadbalancerv1.HealthMonitor{
+			// A match has to constrain something. An empty match list is the
+			// legal way to say "everything"; an empty match is rejected.
+			if matched {
+				rule.Matches = []*loadbalancerv1.HttpRouteMatch{match}
+			}
+			rule.HealthMonitor = &loadbalancerv1.HealthMonitor{
 				Interval:              defaultHealthMonitorInterval,
 				Timeout:               defaultHealthMonitorTimeout,
 				UnhealthyThreshold:    defaultHealthMonitorUnhealthy,
@@ -600,7 +649,7 @@ func (lb *loadbalancer) buildListeners(ctx context.Context, service *corev1.Serv
 				ExpectedStatusCodes:   []int32{200},
 			}
 		} else {
-			listener.HealthMonitor = &loadbalancerv1.HealthMonitor{
+			rule.HealthMonitor = &loadbalancerv1.HealthMonitor{
 				Interval:           defaultHealthMonitorInterval,
 				Timeout:            defaultHealthMonitorTimeout,
 				UnhealthyThreshold: defaultHealthMonitorUnhealthy,
@@ -608,10 +657,101 @@ func (lb *loadbalancer) buildListeners(ctx context.Context, service *corev1.Serv
 			}
 		}
 
-		listeners = append(listeners, listener)
+		listeners = append(listeners, &loadbalancerv1.Listener{
+			Port:       port.Port,
+			Protocol:   protocol,
+			TlsEnabled: false,
+			Rules:      []*loadbalancerv1.ListenerRule{rule},
+		})
 	}
 
 	return listeners
+}
+
+// listenerProtocol picks the listener protocol for one Service port. HTTP is
+// opt-in through the route annotation and only applies on top of TCP; SCTP has
+// no counterpart in the API and is served as a plain TCP stream.
+func listenerProtocol(service *corev1.Service, port corev1.ServicePort) loadbalancerv1.Protocol {
+	if port.Protocol == corev1.ProtocolUDP {
+		return loadbalancerv1.Protocol_PROTOCOL_UDP
+	}
+	if _, hasHTTPRoute := service.Annotations[HTTPRoutePathAnnotationKey]; hasHTTPRoute {
+		return loadbalancerv1.Protocol_PROTOCOL_HTTP
+	}
+	return loadbalancerv1.Protocol_PROTOCOL_TCP
+}
+
+// mergeListenerIDs returns desired with the server-assigned identifiers found in
+// current grafted on, matching listeners by port and protocol.
+//
+// The API reconciles an update by id alone: a listener sent without one is
+// inserted fresh and the row it replaces - along with its rules, its backends
+// and the data plane objects generated from them - is deleted. UpdateLoadBalancer
+// runs on every node that joins or leaves the cluster, so dropping the ids would
+// rebuild the whole listener each time the endpoint list moves.
+//
+// desired is left untouched; the ids are grafted onto clones.
+func mergeListenerIDs(desired, current []*loadbalancerv1.Listener) []*loadbalancerv1.Listener {
+	if len(desired) == 0 {
+		return desired
+	}
+
+	existing := make(map[string]*loadbalancerv1.Listener, len(current))
+	for _, l := range current {
+		if l != nil {
+			existing[listenerKey(l)] = l
+		}
+	}
+
+	merged := make([]*loadbalancerv1.Listener, 0, len(desired))
+	for _, want := range desired {
+		clone := proto.Clone(want).(*loadbalancerv1.Listener)
+		merged = append(merged, clone)
+
+		have := existing[listenerKey(clone)]
+		if have == nil {
+			continue
+		}
+		clone.Id = have.GetId()
+
+		// One rule with one backend on both sides, so position is identity.
+		// Anything else came from outside this controller and is left to the
+		// server's own reconciliation.
+		if len(clone.GetRules()) != 1 || len(have.GetRules()) != 1 {
+			continue
+		}
+		wantRule, haveRule := clone.GetRules()[0], have.GetRules()[0]
+		wantRule.Id = haveRule.GetId()
+
+		if len(wantRule.GetBackends()) != 1 || len(haveRule.GetBackends()) != 1 {
+			continue
+		}
+		wantRule.GetBackends()[0].Id = haveRule.GetBackends()[0].GetId()
+	}
+
+	return merged
+}
+
+func listenerKey(l *loadbalancerv1.Listener) string {
+	return fmt.Sprintf("%d/%s", l.GetPort(), l.GetProtocol())
+}
+
+// validateListeners rejects a payload the API would reject anyway, so the reason
+// reaches the Service event instead of arriving as a generic InvalidArgument.
+func validateListeners(listeners []*loadbalancerv1.Listener) error {
+	if len(listeners) == 0 {
+		return fmt.Errorf("service has no ports to load balance")
+	}
+	for _, l := range listeners {
+		for _, rule := range l.GetRules() {
+			for _, backend := range rule.GetBackends() {
+				if len(backend.GetEndpoints()) == 0 {
+					return fmt.Errorf("no backend endpoints available for port %d; no node addresses and no matching VMI IPs were found", l.GetPort())
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (lb *loadbalancer) parseHTTPMethod(method string) loadbalancerv1.HttpMethod {
@@ -635,14 +775,23 @@ func (lb *loadbalancer) parseHTTPMethod(method string) loadbalancerv1.HttpMethod
 	}
 }
 
-func (lb *loadbalancer) buildBackendRefs(ctx context.Context, port corev1.ServicePort, nodes []*corev1.Node, clusterName string) []*loadbalancerv1.BackendRef {
-	backendRefs := make([]*loadbalancerv1.BackendRef, 0)
+// buildEndpoints resolves the upstream addresses for one Service port. The
+// result is deduplicated and ordered: the API rejects a backend that lists the
+// same ip:port twice, and a stable order keeps the listener hash from changing
+// just because the node list came back in a different sequence.
+//
+// Addresses are filtered through isUsableNodeIP. A node this CCM manages should
+// never carry a link-local address, but in the infra-cluster deployment the node
+// list comes from another cloud provider entirely, and an unroutable endpoint is
+// not merely useless: it makes the whole load balancer fail to provision.
+func (lb *loadbalancer) buildEndpoints(ctx context.Context, port corev1.ServicePort, nodes []*corev1.Node, clusterName string) []*loadbalancerv1.BackendRef {
+	endpoints := make([]*loadbalancerv1.BackendRef, 0)
 
 	if len(nodes) > 0 {
 		for _, node := range nodes {
 			for _, addr := range node.Status.Addresses {
-				if addr.Type == corev1.NodeInternalIP {
-					backendRefs = append(backendRefs, &loadbalancerv1.BackendRef{
+				if addr.Type == corev1.NodeInternalIP && isUsableNodeIP(addr.Address) {
+					endpoints = append(endpoints, &loadbalancerv1.BackendRef{
 						Ip:   addr.Address,
 						Port: port.NodePort,
 					})
@@ -650,12 +799,12 @@ func (lb *loadbalancer) buildBackendRefs(ctx context.Context, port corev1.Servic
 			}
 		}
 
-		if len(backendRefs) == 0 {
-			klog.Warningf("No internal IPs found for backend refs, trying external IPs")
+		if len(endpoints) == 0 {
+			klog.Warningf("No internal IPs found for backend endpoints, trying external IPs")
 			for _, node := range nodes {
 				for _, addr := range node.Status.Addresses {
-					if addr.Type == corev1.NodeExternalIP {
-						backendRefs = append(backendRefs, &loadbalancerv1.BackendRef{
+					if addr.Type == corev1.NodeExternalIP && isUsableNodeIP(addr.Address) {
+						endpoints = append(endpoints, &loadbalancerv1.BackendRef{
 							Ip:   addr.Address,
 							Port: port.NodePort,
 						})
@@ -665,15 +814,38 @@ func (lb *loadbalancer) buildBackendRefs(ctx context.Context, port corev1.Servic
 		}
 	}
 
-	if len(backendRefs) == 0 && clusterName != "" {
+	if len(endpoints) == 0 && clusterName != "" {
 		klog.Warningf("No backend IPs from nodes, falling back to VMI IPs for cluster %s", clusterName)
-		backendRefs = lb.buildBackendRefsFromVMI(ctx, port, clusterName)
+		endpoints = lb.buildEndpointsFromVMI(ctx, port, clusterName)
 	}
 
-	return backendRefs
+	return normalizeEndpoints(endpoints)
 }
 
-func (lb *loadbalancer) buildBackendRefsFromVMI(ctx context.Context, port corev1.ServicePort, clusterName string) []*loadbalancerv1.BackendRef {
+// normalizeEndpoints drops duplicate ip:port pairs and sorts what is left.
+func normalizeEndpoints(endpoints []*loadbalancerv1.BackendRef) []*loadbalancerv1.BackendRef {
+	seen := make(map[string]struct{}, len(endpoints))
+	unique := make([]*loadbalancerv1.BackendRef, 0, len(endpoints))
+	for _, e := range endpoints {
+		key := fmt.Sprintf("%s:%d", e.GetIp(), e.GetPort())
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, e)
+	}
+
+	sort.Slice(unique, func(i, j int) bool {
+		if unique[i].GetIp() != unique[j].GetIp() {
+			return unique[i].GetIp() < unique[j].GetIp()
+		}
+		return unique[i].GetPort() < unique[j].GetPort()
+	})
+
+	return unique
+}
+
+func (lb *loadbalancer) buildEndpointsFromVMI(ctx context.Context, port corev1.ServicePort, clusterName string) []*loadbalancerv1.BackendRef {
 	backendRefs := make([]*loadbalancerv1.BackendRef, 0)
 
 	vmiLabels := client.MatchingLabels{
@@ -688,14 +860,11 @@ func (lb *loadbalancer) buildBackendRefsFromVMI(ctx context.Context, port corev1
 	}
 
 	for _, vmi := range vmList.Items {
-		for _, iface := range vmi.Status.Interfaces {
-			if iface.IP != "" {
-				backendRefs = append(backendRefs, &loadbalancerv1.BackendRef{
-					Ip:   iface.IP,
-					Port: port.NodePort,
-				})
-				break
-			}
+		if ip := defaultInterfaceIP(vmi.Status.Interfaces); ip != "" {
+			backendRefs = append(backendRefs, &loadbalancerv1.BackendRef{
+				Ip:   ip,
+				Port: port.NodePort,
+			})
 		}
 	}
 
@@ -706,10 +875,40 @@ func (lb *loadbalancer) buildBackendRefsFromVMI(ctx context.Context, port corev1
 	return backendRefs
 }
 
+// defaultInterfaceIP picks the address traffic to a VMI should be sent to. Only
+// the "default" interface is the pod network - the rest are whatever the CNI
+// inside the guest created, so a VMI running Cilium reports cilium_host on the
+// pod CIDR and a link-local for every lxc* veth. The guest agent does not order
+// that list, so anything less specific picks a different address run to run.
+func defaultInterfaceIP(ifs []kubevirtv1.VirtualMachineInstanceNetworkInterface) string {
+	for _, iface := range ifs {
+		if iface.Name != "default" {
+			continue
+		}
+		for _, ip := range iface.IPs {
+			if isUsableNodeIP(ip) {
+				return ip
+			}
+		}
+		if isUsableNodeIP(iface.IP) {
+			return iface.IP
+		}
+		return ""
+	}
+	return ""
+}
+
 // UpdateLoadBalancer updates hosts under the specified load balancer.
 func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName string, service *corev1.Service, nodes []*corev1.Node) error {
 	if lb.rpcClient == nil {
 		return fmt.Errorf("load balancer RPC client is not configured")
+	}
+
+	// Node syncs fan out to every LoadBalancer Service in the cluster, including
+	// the ones EnsureLoadBalancer declined. Without this the missing id below is
+	// reported as an error for each of them on every node event.
+	if lb.shouldSkipService(service) && service.Annotations[LoadBalancerIDAnnotationKey] == "" {
+		return nil
 	}
 
 	lbID := service.Annotations[LoadBalancerIDAnnotationKey]
@@ -718,15 +917,39 @@ func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 	}
 
 	listeners := lb.buildListeners(ctx, service, nodes, clusterName)
-	_, err := lb.rpcClient.UpdateLoadBalancer(ctx, &loadbalancerv1.UpdateLoadBalancerRequest{
-		Id:                   lbID,
-		Listeners:            listeners,
+	if err := validateListeners(listeners); err != nil {
+		return err
+	}
+
+	// The service controller calls this on every node add and remove, whether or
+	// not the node affects this Service. Without the guard each of those syncs
+	// sends an update that changes nothing and pushes the load balancer through
+	// another provisioning cycle.
+	if !lb.configChanged(service, listeners) {
+		return nil
+	}
+
+	getResp, err := lb.rpcClient.GetLoadBalancer(ctx, &loadbalancerv1.GetLoadBalancerRequest{Id: lbID})
+	if err != nil {
+		klog.Errorf("Failed to read load balancer before update: %v", err)
+		return stdErrors.New(rpc.ToRPCError(err))
+	}
+
+	if _, err := lb.rpcClient.UpdateLoadBalancer(ctx, &loadbalancerv1.UpdateLoadBalancerRequest{
+		Id:                    lbID,
+		Listeners:             mergeListenerIDs(listeners, getResp.GetLoadBalancer().GetSpec().GetListeners()),
 		SecurityGroupDisabled: pointer.Bool(true),
 		QosPolicyDisabled:     pointer.Bool(true),
-	})
-	if err != nil {
+	}); err != nil {
 		klog.Errorf("Failed to update load balancer via RPC: %v", err)
 		return stdErrors.New(rpc.ToRPCError(err))
+	}
+
+	// EnsureLoadBalancer reads this annotation to decide whether the config
+	// drifted; leaving it stale would make the next Ensure send the same update
+	// a second time.
+	if err := lb.ensureServiceAnnotation(ctx, service, LoadBalancerListenerHashAnnotationKey, listenersHashStr(listeners)); err != nil {
+		klog.Errorf("Failed to record listener hash after update: %v", err)
 	}
 
 	return nil
@@ -734,37 +957,78 @@ func (lb *loadbalancer) UpdateLoadBalancer(ctx context.Context, clusterName stri
 
 // EnsureLoadBalancerDeleted deletes the specified load balancer if it exists.
 func (lb *loadbalancer) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *corev1.Service) error {
+	// Reporting success without a client would let the service controller drop
+	// the cleanup finalizer and leave the load balancer behind with nothing left
+	// pointing at it.
+	if lb.rpcClient == nil {
+		return fmt.Errorf("load balancer RPC client is not configured")
+	}
+
+	// A Service this CCM declined has nothing to clean up - unless it carries an
+	// id, which means it was ours before its config annotations were stripped.
+	if lb.shouldSkipService(service) && service.Annotations[LoadBalancerIDAnnotationKey] == "" {
+		return nil
+	}
+
+	defer lb.clearRetryCount(string(service.UID))
+
 	lbName := lb.GetLoadBalancerName(ctx, clusterName, service)
 	lbID := service.Annotations[LoadBalancerIDAnnotationKey]
 
-	if lbID == "" && lb.rpcClient != nil {
-		resp, listErr := lb.rpcClient.ListLoadBalancers(ctx, &loadbalancerv1.ListLoadBalancersRequest{
-			TenantId: lb.getTenantID(service),
-		})
-		if listErr == nil {
-			for _, summary := range resp.GetLoadBalancers() {
-				if summary.Name == lbName {
-					lbID = summary.Id
-					klog.Infof("Found load balancer by name %s with ID %s", lbName, lbID)
-					break
-				}
-			}
+	if lbID == "" {
+		found, err := lb.findLoadBalancerByName(ctx, lb.getTenantID(service), lbName)
+		if err != nil {
+			klog.Errorf("Failed to look up load balancer %s by name: %v", lbName, err)
+			return stdErrors.New(rpc.ToRPCError(err))
 		}
+		lbID = found
 	}
 
-	if lbID != "" && lb.rpcClient != nil {
-		_, err := lb.rpcClient.DeleteLoadBalancer(ctx, &loadbalancerv1.DeleteLoadBalancerRequest{Id: lbID})
-		if err != nil {
-			st, ok := status.FromError(err)
-			if !ok || st.Code() != codes.NotFound {
-				klog.Errorf("Failed to delete load balancer via RPC: %v", err)
-				return stdErrors.New(rpc.ToRPCError(err))
-			}
-			klog.Infof("Load balancer %s already deleted", lbID)
+	if lbID == "" {
+		return nil
+	}
+
+	if _, err := lb.rpcClient.DeleteLoadBalancer(ctx, &loadbalancerv1.DeleteLoadBalancerRequest{Id: lbID}); err != nil {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.NotFound {
+			klog.Errorf("Failed to delete load balancer via RPC: %v", err)
+			return stdErrors.New(rpc.ToRPCError(err))
 		}
+		klog.Infof("Load balancer %s already deleted", lbID)
 	}
 
 	return nil
+}
+
+// findLoadBalancerByName is the fallback for a Service whose id annotation never
+// made it back - without it that load balancer is orphaned on delete. An error
+// is returned rather than swallowed for the same reason.
+func (lb *loadbalancer) findLoadBalancerByName(ctx context.Context, tenantID, lbName string) (string, error) {
+	pageToken := ""
+	for {
+		resp, err := lb.rpcClient.ListLoadBalancers(ctx, &loadbalancerv1.ListLoadBalancersRequest{
+			TenantId: tenantID,
+			// The API rejects a page size below 1, so leaving this unset made the
+			// whole lookup fail on validation.
+			PageSize:  listLoadBalancersPageSize,
+			PageToken: pageToken,
+		})
+		if err != nil {
+			return "", err
+		}
+
+		for _, summary := range resp.GetLoadBalancers() {
+			if summary.GetName() == lbName {
+				klog.Infof("Found load balancer by name %s with ID %s", lbName, summary.GetId())
+				return summary.GetId(), nil
+			}
+		}
+
+		pageToken = resp.GetNextPageToken()
+		if pageToken == "" {
+			return "", nil
+		}
+	}
 }
 
 func (lb *loadbalancer) ensureServiceAnnotation(ctx context.Context, service *corev1.Service, key, value string) error {
@@ -783,7 +1047,3 @@ func (lb *loadbalancer) ensureServiceAnnotation(ctx context.Context, service *co
 		return lb.tenantClient.Update(ctx, &latest)
 	})
 }
-
-
-
-

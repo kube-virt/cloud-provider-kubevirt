@@ -78,8 +78,8 @@ and either a namespaced `Role`/`RoleBinding` (mode 1) or a
 
 | Annotation | Values | Effect |
 |------------|--------|--------|
-| `kubevirt.io/http-path` | e.g. `/healthz` | Makes **all** listeners of this Service HTTP; sets the HTTPRoute path (prefix match) and the health-check path |
-| `kubevirt.io/http-method` | `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS` | HTTPRoute method and health-check method. Only meaningful together with `http-path`; unknown values fall back to `GET` |
+| `kubevirt.io/http-path` | e.g. `/healthz` | Makes every eligible listener of this Service HTTP; sets the rule's path match (prefix) and the health-check path |
+| `kubevirt.io/http-method` | `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS` | The rule's method match and the health-check method. Only meaningful together with `http-path`; unknown values fall back to `GET` |
 
 ### Only when `onlyServiceController: true`
 
@@ -196,7 +196,10 @@ While provisioning, `EXTERNAL-IP` stays `<pending>`; the CCM blocks inside
 |---------|--------------|
 | `EXTERNAL-IP` stuck `<pending>`, no annotations at all | Mode 2 and the Service is missing `network-id`/`subnet-id` → it is deliberately skipped. Otherwise: no RPC client (empty `rpcServerAddr`) |
 | Event: `FIP network ID is not configured…` | `ipType` is `external`/`both` but `fipNetworkID` is empty |
-| Event: `Invalid load balancer configuration` | The API rejected the spec. Common causes: `tenant_id`/`network_id`/`subnet_id` not UUID-shaped (a namespace name used as tenant fallback is **not** a UUID); a listener with zero backends (no ready nodes / NodePort not allocated); HTTP listener whose health-check path does not start with `/` |
+| Event: `Invalid load balancer configuration` | The API rejected the spec. Common causes: `tenant_id`/`network_id`/`subnet_id` not UUID-shaped (a namespace name used as tenant fallback is **not** a UUID); a NodePort of 0 because `allocateLoadBalancerNodePorts: false`; HTTP listener whose health-check path does not start with `/` |
+| Event: `no backend endpoints available for port <n>` | No node in the watched cluster reports an address, and the VMI fallback found nothing either. Check that nodes are Ready and that the VMIs carry the `cluster.x-k8s.io/role=worker` and `cluster.x-k8s.io/cluster-name` labels |
+| `load balancer <id> failed (state STATE_FAILED: Provisioning timed out …)` and the LB's backend lists an `fe80::…` endpoint | An unroutable address reached the backend list. The datapath rejects it, so the load balancer never finishes provisioning. Check `kubectl get node -o jsonpath='{.items[*].status.addresses}'` — a link-local there means a CCM older than this fix is populating node addresses |
+| `EXTERNAL-IP` is set but the CCM logs `SyncLoadBalancerFailed` | Another IPAM owns `status.loadBalancer.ingress`. With Cilium, check `kubectl get svc <name> -o jsonpath='{.status.conditions}'` for `cilium.io/IPAMRequestSatisfied`; if present, delete the `CiliumLoadBalancerIPPool` or set `enable-lb-ipam=false` in the CNI values so only the CCM publishes an address |
 | Event: `Load balancer service temporarily unavailable` | The gRPC endpoint is down or unreachable; the client already retried `rpcRetryMax` times |
 | Event: `Permission denied…` | Wrong or missing `apiKey` |
 | `load balancer <id> not ready within 2m0s` | Provisioning slower than `creationPollTimeout`. Raise the timeout, or check the LB API side |
@@ -211,8 +214,10 @@ While provisioning, `EXTERNAL-IP` stays `<pending>`; the CCM blocks inside
 * **Deleting a Service deletes the load balancer**, including its floating IP.
 * **Do not hand-edit the CCM annotations.** They are the only record linking a
   Service to its load balancer.
-* **Node changes** (scale up/down, IP change) rewrite every listener's backends
-  on the next sync — brief connection resets on the LB are expected.
+* **Node changes** (scale up/down, IP change) rewrite every listener's endpoint
+  list on the next sync. The listener, its rule and its backend keep their
+  identifiers, so only the endpoints move; other node events, which do not change
+  the endpoint list, no longer send an update at all.
 * **Rolling the CCM** loses the in-memory "not ready" retry counter, so a stuck
   LB gets another 10 retries before the recreate path triggers. The recreate
   count survives, because it is an annotation.
