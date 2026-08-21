@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -65,7 +68,12 @@ func NewClient(ctx context.Context, config *Config) (*Client, error) {
 		config.DialOpts = append(config.DialOpts, grpc.WithPerRPCCredentials(apiKeyCreds{apiKey: config.ApiKey}))
 	}
 
-	conn, err := grpc.DialContext(ctx, config.ServerAddr, config.DialOpts...)
+	target, err := normalizeServerAddr(config.ServerAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := grpc.DialContext(ctx, target, config.DialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial RPC server: %w", err)
 	}
@@ -77,6 +85,49 @@ func NewClient(ctx context.Context, config *Config) (*Client, error) {
 		client: client,
 		config: config,
 	}, nil
+}
+
+// normalizeServerAddr turns a configured address into a target gRPC can dial.
+// gRPC expects "host:port"; given "http://host:port" it treats the whole string
+// as an address and the dial fails with "too many colons in address", which
+// says nothing about the real problem. An http:// URL is a natural thing to
+// write in a config file, so accept it and strip it down.
+//
+// Anything carrying a scheme gRPC understands itself - dns:, unix:,
+// passthrough: - is handed through untouched.
+func normalizeServerAddr(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", fmt.Errorf("RPC server address is empty")
+	}
+	if !strings.Contains(addr, "://") {
+		return addr, nil
+	}
+
+	u, err := url.Parse(addr)
+	if err != nil {
+		return "", fmt.Errorf("invalid RPC server address %q: %w", addr, err)
+	}
+
+	switch u.Scheme {
+	case "http":
+	case "https":
+		// Silently dialing plaintext would betray what the address asked for.
+		return "", fmt.Errorf("invalid RPC server address %q: TLS is not supported, use http:// or host:port", addr)
+	default:
+		return addr, nil
+	}
+
+	// Hostname/Port rather than Host, so a bracketed IPv6 literal survives.
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("invalid RPC server address %q: no host", addr)
+	}
+	port := u.Port()
+	if port == "" {
+		port = "80"
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 func (c *Client) Close() error {

@@ -208,6 +208,13 @@ the proto if you want to wire them to config.
 * **Transport is plaintext.** `cloud.go` dials with
   `insecure.NewCredentials()`; the `apiKey` bearer token rides on that. Adding
   TLS means changing `DialOpts` and flipping `apiKeyCreds.RequireTransportSecurity`.
+  `normalizeServerAddr` therefore rejects an `https://` address instead of
+  stripping the scheme and dialing plaintext behind the operator's back.
+* **`rpcServerAddr` is normalised before dialing.** gRPC wants `host:port`; an
+  `http://host:port` URL is dialed verbatim and fails with `too many colons in
+  address`, which points nowhere near the real problem. `normalizeServerAddr`
+  accepts both forms and leaves gRPC's own resolver targets (`dns:`, `unix:`,
+  `passthrough:`) alone.
 
 ## 8. Debugging against a live cluster
 

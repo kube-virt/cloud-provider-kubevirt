@@ -17,6 +17,8 @@ cloudConfig:
     enabled: true
     zoneAndRegionEnabled: false
 
+# LoadBalancer API gRPC endpoint. Either "host:port" or "http://host:port";
+# TLS is not supported, so https:// is rejected.
 rpcServerAddr: ""
 rpcKeepAlive: 30
 rpcRetryMax: 3

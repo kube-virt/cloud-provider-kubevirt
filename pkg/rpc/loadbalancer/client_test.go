@@ -92,3 +92,54 @@ func TestCalculateBackoffIsCapped(t *testing.T) {
 		}
 	}
 }
+
+// The configured address is written by hand in a ConfigMap, so it turns up both
+// as a bare host:port and as an http:// URL. gRPC only understands the former:
+// handed "http://10.2.5.250:9000" it dials that whole string and fails with
+// "too many colons in address".
+func TestNormalizeServerAddr(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"host and port", "10.2.5.250:9000", "10.2.5.250:9000"},
+		{"http url", "http://10.2.5.250:9000", "10.2.5.250:9000"},
+		{"http url with trailing slash", "http://10.2.5.250:9000/", "10.2.5.250:9000"},
+		{"http url without port", "http://lb.example.com", "lb.example.com:80"},
+		{"surrounding whitespace", "  http://10.2.5.250:9000\n", "10.2.5.250:9000"},
+		{"dns name and port", "lb.example.com:9000", "lb.example.com:9000"},
+		{"ipv6 url", "http://[fd00::1]:9000", "[fd00::1]:9000"},
+		{"grpc resolver target", "dns:///lb.example.com:9000", "dns:///lb.example.com:9000"},
+		{"unix socket", "unix:///var/run/lb.sock", "unix:///var/run/lb.sock"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeServerAddr(tc.in)
+			if err != nil {
+				t.Fatalf("normalizeServerAddr(%q) returned error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("normalizeServerAddr(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeServerAddrRejects(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{"empty", "  "},
+		// Stripping the scheme and dialing plaintext anyway would quietly
+		// deliver the opposite of what the address asked for.
+		{"https", "https://10.2.5.250:9000"},
+		{"no host", "http://"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := normalizeServerAddr(tc.in); err == nil {
+				t.Errorf("normalizeServerAddr(%q) = %q, want an error", tc.in, got)
+			}
+		})
+	}
+}

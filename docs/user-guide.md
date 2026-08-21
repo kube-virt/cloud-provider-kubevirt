@@ -57,7 +57,7 @@ and either a namespaced `Role`/`RoleBinding` (mode 1) or a
 | `image.repository` / `image.tag` / `image.pullPolicy` | `sumon124816/openstack` / `ccm` / `Always` | CCM image |
 | `resources` | 100m / 128Mi requests | Container resources |
 | `clusterName` | `capi-slowstart` | Passed as `--cluster-name`; also names the kubeconfig Secret (`<clusterName>-kubeconfig`) and is the `cluster.x-k8s.io/cluster-name` value used for the VMI backend fallback |
-| `rpcServerAddr` | `10.2.3.250:9000` | LoadBalancer API gRPC address |
+| `rpcServerAddr` | `10.2.3.250:9000` | LoadBalancer API gRPC address. Either `host:port` or `http://host:port` — the scheme is stripped before dialing. The transport is plaintext, so `https://` is rejected at startup rather than silently downgraded |
 | `rpcKeepAlive` | `30` | Deadline for a single RPC attempt, seconds. Each retry gets a fresh one, so an unreachable server blocks a sync for at most `(rpcRetryMax + 1) x rpcKeepAlive` |
 | `rpcRetryMax` | `3` | Extra retry attempts per RPC |
 | `apiKey` | `""` | Bearer token for the LoadBalancer API; empty disables auth |
