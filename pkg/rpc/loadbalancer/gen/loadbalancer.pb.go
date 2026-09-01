@@ -4487,7 +4487,7 @@ const file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDesc = "" +
 	"\vDeleteRules\x12#.loadbalancer.v1.DeleteRulesRequest\x1a$.loadbalancer.v1.DeleteRulesResponse\x12j\n" +
 	"\x11SetRulePriorities\x12).loadbalancer.v1.SetRulePrioritiesRequest\x1a*.loadbalancer.v1.SetRulePrioritiesResponse\x12C\n" +
 	"\x04Ping\x12\x1c.loadbalancer.v1.PingRequest\x1a\x1d.loadbalancer.v1.PingResponse\x12j\n" +
-	"\x11AuthenticatedPing\x12).loadbalancer.v1.AuthenticatedPingRequest\x1a*.loadbalancer.v1.AuthenticatedPingResponseBJZHgithub.com/kube-virt/loadbalancer-api/gen/loadbalancer/v1;loadbalancerv1b\x06proto3"
+	"\x11AuthenticatedPing\x12).loadbalancer.v1.AuthenticatedPingRequest\x1a*.loadbalancer.v1.AuthenticatedPingResponseBJZHgithub.com/kontainercloud/loadbalancer-api/gen/loadbalancer/v1;loadbalancerv1b\x06proto3"
 
 var (
 	file_pkg_rpc_loadbalancer_gen_loadbalancer_proto_rawDescOnce sync.Once

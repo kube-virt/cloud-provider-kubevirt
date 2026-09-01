@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/kube-virt/cloud-provider-kubevirt
+  repository: ghcr.io/kontainercloud/cloud-provider-kubevirt
   tag: v0.1.0-ac
   pullPolicy: IfNotPresent
 

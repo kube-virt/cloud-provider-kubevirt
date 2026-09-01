@@ -5,7 +5,7 @@ package loadbalancer.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/kube-virt/loadbalancer-api/gen/loadbalancer/v1;loadbalancerv1";
+option go_package = "github.com/kontainercloud/loadbalancer-api/gen/loadbalancer/v1;loadbalancerv1";
 
 // LoadBalancerService manages load balancer lifecycle.
 service LoadBalancerService {
